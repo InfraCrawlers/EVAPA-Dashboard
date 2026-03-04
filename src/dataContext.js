@@ -66,6 +66,43 @@ export function DataProvider({ children }){
         if(payload && typeof payload.body === 'string'){
           try{ payload = JSON.parse(payload.body) }catch(e){ /* keep original */ }
         }
+
+        // Normalize the API shape: if payload is an array of report objects with `vulnerabilities`,
+        // transform to the internal format: array with a report_summary item and finding items.
+        // Example incoming item shape handled:
+        // { sk, processed_timestamp, total_high_severity_count, vulnerabilities: [ { host, threat_level, vulnerability_name, cvss_severity, port, nvt_oid } ], pk }
+        if(Array.isArray(payload)){
+          try{
+            const transformed = []
+            payload.forEach(rep => {
+              const reportSummary = {
+                item_type: 'report_summary',
+                scan_start: rep.processed_timestamp || rep.sk || rep.scan_start || null,
+                report_id: rep.pk || rep.id || null,
+                total_high_severity_count: rep.total_high_severity_count || 0,
+                raw: rep
+              }
+              transformed.push(reportSummary)
+              const vulns = Array.isArray(rep.vulnerabilities) ? rep.vulnerabilities : []
+              vulns.forEach(v=>{
+                transformed.push({
+                  item_type: 'finding',
+                  name: v.vulnerability_name || v.name || 'Unnamed',
+                  host: v.host || v.hostname || v.asset || 'unknown',
+                  port: v.port || undefined,
+                  severity: v.threat_level || v.severity || 'Unknown',
+                  severity_num: (typeof v.cvss_severity === 'number') ? v.cvss_severity : (Number(v.cvss_severity) || 0),
+                  cvss: v.cvss_severity || v.cvss || null,
+                  cves: v.nvt_oid ? [v.nvt_oid] : (v.cves || []),
+                  description: v.description || '',
+                  reference: v.nvt_oid ? `nvt:${v.nvt_oid}` : v.reference || '',
+                  raw: v
+                })
+              })
+            })
+            payload = transformed
+          }catch(e){ /* fall back to original payload */ }
+        }
         if(!cancelled) {
           setData(payload)
           // cache for 1 day
