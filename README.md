@@ -10,91 +10,94 @@ This repository contains a responsive React dashboard application that fetches v
 - Features
 - Architecture & Key Files
 - Data Fetching & Shape
-- User Interface and Design
-- Accessibility & Performance
-- Developer Setup & Scripts
-- How to extend (icons, export, print, tests)
-- Troubleshooting
-- Screenshots & Visual Guide
 
----
+ # Vulnerability Dashboard
 
-## Overview
+ A concise, up-to-date summary of this React dashboard and important implementation details.
 
-The dashboard presents vulnerability scan data with a single network fetch (performed by a `DataProvider` context). It exposes two primary views:
+ ## Highlights
 
-- **Overview** — KPIs, charts, and scan summary.
-- **Vulnerabilities** — searchable, pageable table and mobile-friendly cards with full descriptions and CSV export.
+- Single daily API fetch: the app caches the last successful payload for 24 hours so the external API is called at most once per day.
+- Local persistence: fetched reports are saved in `localStorage` under `vd:reports` with a 30-day retention and a 500-item cap.
+- Persistence: the app uses browser `localStorage` by default to persist fetched reports. (Server-side Redis scaffold removed.)
+- History & aggregates: The `History` page lists stored reports (server-first, local fallback). `Overview` shows daily and weekly aggregates when historical data exists.
 
-The app is intentionally minimalist, mobile-first, and styled centrally in `src/index.css`.
+## What’s in the repo
 
-## Features
+- `src/dataContext.js` — Single-fetch provider. Behavior:
+  - Caches the last payload for 24h (`vd:lastPayload` / `vd:lastFetch`).
+  - Persists each fetched report to localStorage (`vd:reports`) with 30-day retention.
+  - Attempts a best-effort POST to `http://localhost:4000/api/reports` when a server is available.
+- `src/components/Dashboard.js` — App layout and sidebar navigation (Overview, Vulnerabilities, Assets, History). Sidebar uses compact brand mark and emoji/icons.
+- `src/components/Overview.js` — KPIs, charts, scan summary, and historical daily/weekly aggregates (computed from `vd:reports`).
+- `src/components/History.js` — Loads stored reports from server or `localStorage`, prefers scan timestamps embedded in payloads for display.
+- `src/components/Vulnerabilities.js` — Searchable, pageable table with CSV export, modal details, and responsive mobile cards.
+- `src/index.css` — Centralized styling and theme variables.
+-- `server/` — legacy server scaffold was present but is no longer required; localStorage is the supported persistence mode.
 
-- Single-fetch data via React Context (`src/dataContext.js`).
-- Overview: KPI cards, CVSS distribution bar, severity pie, top hosts.
-- Vulnerabilities: severity filter tabs, search, pagination, full Description column, CSV export, print-friendly styles, and mobile card-list.
-- Polished UI: consistent cards, hover effects, responsive breakpoints, reduced-motion support.
-- Icons via Font Awesome (CDN integration in `public/index.html`).
+## Data shapes
 
-## Architecture & Key Files
+- The provider expects a scan payload that contains `finding` items and a `report_summary` item (often within an array). Typical finding keys: `name`, `host`/`hostname`, `severity_num`/`cvss`, `cves`, `description`, `solution`.
 
-- `src/dataContext.js` — Fetches `/testing/getdata` once and provides `{ data, loading, error }`.
-- `src/App.js` — Wraps the app in `DataProvider` and renders `Dashboard`.
-- `src/components/Dashboard.js` — Layout: sidebar, topbar, main content and routing between Overview and Vulnerabilities.
-- `src/components/Overview.js` — KPI cards, `Charts` component, scan summary.
-- `src/components/Charts.js` — Chart.js-based bar and pie charts and host list.
-- `src/components/Vulnerabilities.js` — Searchable, pageable table; mobile card-list; CSV export; modal details.
-- `src/index.css` — Centralized styling, variables, responsive breakpoints, print styles.
-- `public/index.html` — Includes Font Awesome CDN link for icons.
+## Running the app
 
-## Data Fetching & Shape
+1) Frontend only
 
-- The `DataProvider` uses Axios to fetch from `/testing/getdata`. If the API returns an envelope object with a `body` JSON string, the provider parses it.
-- The data structure expected includes items of `item_type: 'finding'` and `item_type: 'report_summary'`.
-- Findings should include keys such as `name`, `hostname` or `host`, `severity`, `severity_num` or `cvss_num`, `cvss`, `cves` (array), `description`, `solution`, and `reference`.
-
-Example finding item:
-```
-{
-	item_type: 'finding',
-	name: 'Outdated OpenSSL',
-	hostname: 'web-01',
-	severity: 'High',
-	severity_num: 7.5,
-	cvss: 7.5,
-	cves: ['CVE-XXXX-YYYY'],
-	description: 'Long description text...',
-	solution: 'Upgrade package',
-	reference: 'https://example.com'
-}
+```bash
+npm install
 ```
 
-## User Interface and Design
+Table of contents
+- Purpose
+- Key features
+- Code structure & responsibilities
+- Data flow and persistence
+- Operational instructions
+- Security and privacy considerations
+- Operational limits and tradeoffs
+- Suggested next steps (prioritized)
 
-- Centralized variables allow easy theming (`:root` vars in `src/index.css`).
-- Sidebar contains Overview/Vulnerabilities; mobile menu toggles overlay sidebar.
-- The Overview page uses KPI cards with progress bars, charts, and a scan summary card.
-- The Vulnerabilities page supports:
-	- Severity tabs for quick filtering.
-	- Search box for name/host/CVE.
-	- Pagination for desktop table.
-	- Mobile card-list rendering for small screens (<=640px), showing full description and CVEs.
-	- Row click opens a details modal with all fields.
-	- CSV export and Print buttons in the UI (Font Awesome icons).
+Purpose
+-------
+This repository contains a production-feasible single-page React application that presents vulnerability scan data in a concise dashboard. It is designed for demos and light-weight local use, with built-in local persistence for historical analysis and simple aggregations.
 
-## Accessibility & Performance
+Key features (implemented)
+--------------------------
+- Single daily API fetch and caching: the app fetches the external scan payload at most once per 24 hours and caches the result in `localStorage`.
+- Local persistence: every fetched payload is persisted to browser `localStorage` under `vd:reports` so the user has a local history without extra infrastructure.
+- Overview aggregates: the `Overview` page computes daily and weekly report-count aggregates from the persisted history and displays the last 7 days and last 8 weeks counts.
+- Core pages: Overview, Vulnerabilities (search, severity filter, pagination, CSV export, print view), Assets inventory, History (payload viewer).
+- Responsive design and accessibility basics: centralized styles, keyboard-accessible navigation, and reduced-motion support.
 
-- Single fetch reduces network overhead.
-- `prefers-reduced-motion` respected in CSS.
-- ARIA: `aria-expanded` added to the mobile menu button, sidebar uses `aria-hidden` when closed.
-- Buttons include sufficient hit area for touch devices.
-- Table headers are sticky for easier scanning.
+Code structure & responsibilities
+--------------------------------
+- `src/dataContext.js` — single source of truth for data fetching and persistence. Responsibilities:
+  - Fetch `/testing/getdata` and parse envelope `body` when present.
+  - Cache the last successful payload (`vd:lastPayload`) and timestamp (`vd:lastFetch`) to enforce the 24-hour fetch limit.
+  - Persist each successful fetch into `vd:reports` with 30-day retention and a 500-item cap.
+  - Attempt a best-effort non-blocking POST to a server endpoint if present (this is optional and safe to ignore when unavailable).
+- `src/components/Dashboard.js` — application shell (sidebar navigation, topbar, routing between pages).
+- `src/components/Overview.js` — KPI cards, charts, scan summary, and daily/weekly aggregates computed from local history.
+- `src/components/Vulnerabilities.js` — primary findings table with search, severity tabs, pagination, modal details, CSV export and mobile card rendering.
+- `src/components/History.js` — viewer for persisted reports (source: localStorage). Shows payload and scan timestamp (prefers payload `report_summary.scan_start`).
+- `src/components/Charts.js` — visualizations (react-chartjs-2) used in Overview for severity/CVSS distributions.
+- `src/index.css` — central styling, CSS variables, responsive breakpoints, print styles.
 
-## Developer Setup & Scripts
+Data flow and persistence
+------------------------
+1. On app load, `DataProvider` checks `vd:lastFetch` (timestamp). If it is within the last 24 hours, the provider uses `vd:lastPayload` and does not call the external API.
+2. If the cache is stale or missing, the provider requests `/testing/getdata`, parses the payload, sets context state, and:
+   - Stores the payload as `vd:lastPayload` with `vd:lastFetch = now` to enforce the 24-hour rule.
+   - Appends `{ id, created_at, payload }` to `vd:reports` (unshift) and prunes older entries older than 30 days and trims to 500 items.
+   - Attempts a non-blocking POST to `http://localhost:4000/api/reports` (if a server is running) with a small timeout. Failures are ignored deliberately.
+3. The `History` page reads `vd:reports` (localStorage) and displays entries. It prefers `report_summary.scan_start` inside the payload to show the scan date/time.
+4. `Overview` reads `vd:reports` and computes daily and weekly aggregates (counts) for recent days/weeks.
 
+Operational instructions
+----------------------
 Prerequisites: Node.js 16+ and npm.
 
-Install and run:
+Run frontend (development):
 
 ```bash
 npm install
@@ -107,58 +110,18 @@ Build for production:
 npm run build
 ```
 
-Local dev server serves at `http://localhost:3000`.
+Notes on persistence: no external services are required — history and aggregates are built from `localStorage`. This makes the app easy to run for demos and internal use without provisioning infrastructure.
 
-## How to extend
+Operational limits & tradeoffs
+-----------------------------
+- localStorage capacity: browsers limit local storage; storing many full payloads may hit quota. Current implementation caps to 500 items and prunes to 30 days, but if payloads are large you may still exhaust space.
+- Single-machine history: localStorage persists per-browser profile only. For team-wide history use a centralized server and secure it.
+- Aggregations: current aggregates are simple counts per day/week. No severity-weighted or CVE-based aggregation yet.
 
-- Replace Font Awesome CDN with an npm package if you prefer bundling icons.
-- Add CSV export improvements: include report metadata or selected filters in the CSV header.
-- Add server-side pagination if the dataset becomes very large.
-- Add authentication/authorization wrappers around the dashboard.
-
-## Print & Export
-
-- The Vulnerabilities page includes a CSV export button (exports all filtered rows).
-- Print-friendly CSS hides non-essential UI and formats the table for paper.
-
-## Troubleshooting
-
-- If the app fails to load data, check `package.json` proxy or dev server proxy; ensure `/testing/getdata` is reachable.
-- For chart issues, ensure `react-chartjs-2` and `chart.js` are installed.
-
-## Server persistence (optional)
-
-- A small Express + Redis server has been added under `server/` to persist fetched reports.
-- Endpoints provided:
-	- `POST /api/reports` — store a report (the frontend `DataProvider` posts reports best-effort).
-	- `GET /api/reports?limit=50` — list stored reports (most recent first by timestamp).
-	- `GET /api/reports/:id` — fetch a single stored report.
-	- `POST /api/cleanup` — remove reports older than a provided timestamp (admin use).
-
-How to run (Docker Compose):
-
-```bash
-cd server
-docker compose up --build
-```
-
-Or run locally:
-
-```bash
-cd server
-npm install
-PORT=4000 REDIS_URL=redis://localhost:6379 npm start
-```
-
-Notes:
-- The frontend posts reports to `http://localhost:4000/api/reports` with a short timeout; failures are ignored so the UI remains functional if the server is not running.
-- The server stores each report as `vd:report:<id>` and indexes IDs in a sorted set `vd:reports` (score = timestamp) for range queries and listing.
-- Retention/cleanup is manual via `POST /api/cleanup` with `{ "before": <unix_ms> }`, or you can add a scheduled job to call cleanup periodically (recommended default retention: 90 days).
-
-Local persistence (browser fallback):
-
-- The app now also persists fetched reports to the browser `localStorage` under the key `vd:reports`.
-- Local retention defaults to 30 days. The provider prunes older entries automatically and caps the stored list (500 items).
-- `History` will attempt to load from the server first; if unreachable it falls back to `localStorage` and shows the stored reports.
-
-You can continue to use the server approach (Redis) for centralized storage, or rely on `localStorage` for a quick local history without additional infrastructure.
+Suggested next steps (prioritized)
+---------------------------------
+1. Replace aggregate lists with small charts in `Overview` for quicker visual insight.
+2. Add a `History` date-range filter and per-report export (CSV or JSON), plus a modal preview for payloads.
+3. Add optional compression/metadata-only persistence to reduce localStorage footprint (save just summary and indices instead of full payloads).
+4. If centralized history is needed, add a small server with secure auth and replace the localStorage fallback accordingly.
+5. Add unit tests for the `DataProvider` caching and `Overview` aggregation logic and add a simple CI build.
