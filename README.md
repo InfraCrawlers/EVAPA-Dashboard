@@ -1,11 +1,10 @@
-# Vulnerability Dashboard — Detailed Report
 # Vulnerability Dashboard
 
-This README documents the exact features implemented in this repository. It focuses on the code that is present in the workspace today (no imagined or removed features). Use this as a developer-facing reference for running, extending, or handing off the dashboard.
+This README documents the exact features implemented in this repository. It focuses on the code that is present in the workspace today. Use this as a developer-facing reference for running, extending, or handing off the dashboard.
 
 ---
 
-**What this repo implements (short)**
+**What this repo implements**
 - Single daily API fetch with a 24-hour cache to avoid repeated API calls.
 - Local history persisted in browser `localStorage` under the `vd:reports` key (30-day retention, 500-item cap).
 - Overview and Vulnerabilities pages with KPIs, charts, searchable pageable findings, CSV export, and print support.
