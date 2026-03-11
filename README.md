@@ -1,235 +1,311 @@
 # Vulnerability Dashboard
 
-This README documents the exact features implemented in this repository. It focuses on the code that is present in the workspace today. Use this as a developer-facing reference for running, extending, or handing off the dashboard.
+A lightweight React-based dashboard for visualizing vulnerability scan data.
+The application fetches security scan reports, normalizes them into a consistent format, and provides interactive views for analysis, reporting, and historical tracking.
+
+The system is designed to operate **without requiring a backend server**, using browser-based storage and caching for persistence.
 
 ---
 
-**What this repo implements**
-- Single daily API fetch with a 24-hour cache to avoid repeated API calls.
-- Local history persisted in browser `localStorage` under the `vd:reports` key (30-day retention, 500-item cap).
-- Overview and Vulnerabilities pages with KPIs, charts, searchable pageable findings, CSV export, and print support.
-- A normalization layer in `src/dataContext.js` that adapts incoming API envelopes into the app's internal item format so UI components are unchanged.
+## Features
 
-**Quick start**
-Prerequisites: Node 16+ and npm.
+* 24-hour API caching to avoid unnecessary requests
+* Automatic vulnerability data normalization
+* Historical report tracking stored in browser localStorage
+* Overview dashboard with KPIs and visual charts
+* Searchable vulnerability findings
+* Host / asset inventory view
+* CSV export for vulnerability reports
+* Print-friendly report generation
+* Mobile responsive vulnerability views
 
-1. Install dependencies:
+---
+
+## Quick Start
+
+### Prerequisites
+
+* Node.js **16+**
+* npm
+
+### Install dependencies
 
 ```bash
 npm install
 ```
 
-2. Start development server:
+### Start the development server
 
 ```bash
 npm start
 ```
 
-No server is required for the app to run — persistence and history are handled in-browser via `localStorage`.
+The app will run locally and store data in the browser using **localStorage**.
 
-**Core files to inspect**
-- `src/dataContext.js` — fetch + cache + normalization + local persistence (`vd:lastPayload`, `vd:lastFetch`, `vd:reports`).
-- `src/components/Dashboard.js` — app shell and route definitions.
-- `src/components/Overview.js` — KPI cards, Charts integration, daily/weekly aggregates from `vd:reports`.
-- `src/components/Charts.js` — `react-chartjs-2` wrappers used by Overview.
-- `src/components/Vulnerabilities.js` — table, search, pagination, CSV export, modal and mobile card rendering.
-- `src/components/AssetsInventory.js` — host inventory and per-host findings.
-- `src/components/History.js` — reads `vd:reports` and displays persisted payloads.
-- `src/index.css` — central stylesheet and responsive rules.
+No backend server is required.
 
-Architecture (runtime data flow)
---------------------------------
-Mermaid diagram:
+---
+
+## Project Structure
+
+```
+src/
+ ├── components/
+ │   ├── Dashboard.js
+ │   ├── Overview.js
+ │   ├── Charts.js
+ │   ├── Vulnerabilities.js
+ │   ├── AssetsInventory.js
+ │   └── History.js
+ │
+ ├── dataContext.js
+ ├── index.css
+ └── index.js
+
+docs/
+ └── screenshots/
+     ├── overview-desktop.png
+     ├── vulnerabilities-desktop.png
+     ├── vulnerabilities-mobile.png
+     ├── assets-inventory.png
+     └── history-report.png
+```
+
+---
+
+## Core Components
+
+### `src/dataContext.js`
+
+Handles:
+
+* API data fetching
+* Caching logic
+* Payload normalization
+* localStorage persistence
+
+### `Dashboard.js`
+
+Defines the application shell and routing between views.
+
+### `Overview.js`
+
+Displays:
+
+* KPI cards
+* severity distribution
+* historical vulnerability statistics
+
+### `Charts.js`
+
+Wrapper components built using:
+
+* `chart.js`
+* `react-chartjs-2`
+
+### `Vulnerabilities.js`
+
+Provides:
+
+* searchable vulnerability table
+* pagination
+* CSV export
+* modal details view
+* responsive mobile layout
+
+### `AssetsInventory.js`
+
+Displays asset-level vulnerability data.
+
+### `History.js`
+
+Displays previously saved scan reports stored locally.
+
+---
+
+## Architecture Overview
 
 ```mermaid
 flowchart LR
   API[External API /testing/getdata]
-  DP[DataProvider - src/dataContext.js]
-  LS[localStorage - vd:lastPayload, vd:reports]
+  DP[DataProvider - dataContext.js]
+  LS[localStorage]
   Context[React Context]
-  Overview[Overview]
-  Charts[Charts]
-  Vuln[Vulnerabilities]
-  Assets[AssetsInventory]
-  History[History]
-  API -->|GET /testing/getdata| DP
-  DP -->|cache & persist| LS
+  Overview[Overview Page]
+  Vuln[Vulnerabilities Page]
+  Assets[Assets Inventory]
+  History[History Page]
+
+  API --> DP
+  DP --> LS
   DP --> Context
   Context --> Overview
   Context --> Vuln
   Context --> Assets
   History --> LS
-  Overview --> Charts
 ```
-
-Data fetching, caching & persistence (precise behavior)
------------------------------------------------------
-- Cache keys used:
-  - `vd:lastPayload` — JSON of the last successful payload used by the UI.
-  - `vd:lastFetch` — timestamp (ms) when the last successful fetch occurred.
-  - `vd:reports` — array of historical saved payloads: each entry `{ id, created_at, payload }`.
-- Cache policy: when the app loads, `DataProvider` reads `vd:lastFetch`. If the timestamp is present and less than 24 hours old, the provider uses `vd:lastPayload` and **does not** call the API.
-- Fetch path: when cache is stale or missing, `DataProvider` requests `/testing/getdata`. On success it:
-  - normalizes the payload (see section below),
-  - sets `vd:lastPayload` and `vd:lastFetch = Date.now()`,
-  - unshifts `{ id, created_at, payload }` into `vd:reports`, pruning entries older than 30 days and truncating to 500 items.
-  - attempts a best-effort non-blocking POST to `http://localhost:4000/api/reports` if a server is present (failures are ignored).
-
-Normalization: incoming -> internal mapping
-------------------------------------------
-The app accepts the newer API envelope shape where the response can be an HTTP-style envelope with a `body` string containing JSON, and where each report object may hold a `vulnerabilities` array.
-
-Implementation details in `src/dataContext.js`:
-- If the top-level response contains a `body` string, the provider attempts `JSON.parse(body)`.
-- If the parsed payload is an array of report objects, the provider transforms each report into:
-  - One `report_summary` item: `{ item_type: 'report_summary', scan_start, report_id, total_high_severity_count, raw: <original_report> }`.
-  - For each vulnerability in `report.vulnerabilities`, a `finding` item: `{ item_type: 'finding', name: vulnerability.vulnerability_name || vulnerability.name, host: vulnerability.host || vulnerability.hostname, port: vulnerability.port, severity: vulnerability.threat_level || vulnerability.severity, severity_num: Number(vulnerability.cvss_severity) || Number(vulnerability.severity_num) || 0, cvss: vulnerability.cvss_severity || vulnerability.severity_num, cves: vulnerability.nvt_oid ? [vulnerability.nvt_oid] : vulnerability.cves || [], raw: vulnerability }`.
-- All normalized items retain an original `raw` field that contains the original object to preserve full fidelity.
-
-Why normalization exists: it lets the existing UI (Overview, Vulnerabilities) continue to expect `report_summary` + `finding` items without modifying presentation code.
-
-Overview aggregation (what's implemented)
-----------------------------------------
-- `Overview` reads `vd:reports` and computes daily counts (YYYY-MM-DD) and weekly counts (week-start). The page shows the last 7 days and last 8 weeks as textual lists of counts and uses `Charts.js` for severity/CVSS visuals.
-
-Charts and visualization
------------------------
-- `react-chartjs-2` + `chart.js` are used. Implemented charts:
-  - Severity pie: shows Critical / High / Medium / Low distribution.
-  - CVSS bar: shows bucketed CVSS distribution.
-
-Export & print
---------------
-- CSV export for findings: client-side CSV generation using Blob; `Vulnerabilities` and `AssetsInventory` include export buttons.
-- Print: `window.print()` invoked by the UI to render a print-friendly version.
-
-Operational limits & tradeoffs (explicit)
----------------------------------------
-- localStorage is the single source of historical persistence; if payloads are very large the browser quota may be reached despite pruning. Consider metadata-only persistence to reduce size.
-- This app does not implement authentication or team-shared history. For multi-user history, add a secure backend.
-
-Files intentionally not present / removed
---------------------------------------
-- No production server dependency is required. A server scaffold exists in the repo for optional use, but running the app does not require it.
-- No Redis, no centralized storage, and no authentication are implemented.
-- No automated tests or CI configuration are included.
-
-Developer next steps (prioritized)
-----------------------------------
-1. Replace textual daily/weekly aggregate lists with small sparklines (Chart.js) in `Overview` — small, high-ROI UI change.
-2. Add History filters (date-range) and per-report JSON/CSV export.
-3. Implement optional compressed/metadata-only history to reduce `localStorage` usage.
-4. Add unit tests for `src/dataContext.js` normalization and `src/components/Overview.js` aggregation.
-
-If you want, I can implement the first item (sparklines for daily/weekly aggregates) now — confirm and I will add the Chart.js sparklines into `Overview` and update the README with sample screenshot instructions.
 
 ---
 
-**Diagrams (flowcharts you can render)**
-
-Below are additional Mermaid diagrams you can render locally (VS Code Mermaid Preview or mermaid.live). They document component interactions, data flow from the external API to the store, and the caching/persistence lifecycle.
-
-1) Component interaction (how Context provides data to views)
-
-```mermaid
-graph LR
-  DP[DataProvider]
-  Context[App Context]
-  Dashboard[Dashboard Shell]
-  Overview[Overview]
-  Vuln[Vulnerabilities]
-  Assets[AssetsInventory]
-  History[History]
-  DP --> Context
-  Context --> Dashboard
-  Dashboard --> Overview
-  Dashboard --> Vuln
-  Dashboard --> Assets
-  Dashboard --> History
-```
-
-2) Data flow (API -> normalize -> localStorage -> UI)
+## Data Flow
 
 ```mermaid
 flowchart TD
-  API[External API /testing/getdata]
-  HTTP_ENV[Optional HTTP Envelope with body]
-  PARSE[Parse JSON and normalize]
-  NORM[Normalized items: report_summary + finding]
-  LS[localStorage - vd:lastPayload, vd:reports]
-  CONTEXT[React Context / DataProvider state]
-  UI[Overview / Vulnerabilities / Assets / History]
-  API --> HTTP_ENV
-  HTTP_ENV --> PARSE
-  PARSE --> NORM
-  NORM --> LS
-  NORM --> CONTEXT
+  API[External API]
+  PARSE[Parse API response]
+  NORMALIZE[Normalize data]
+  STORE[Store in localStorage]
+  CONTEXT[React Context State]
+  UI[Dashboard Components]
+
+  API --> PARSE
+  PARSE --> NORMALIZE
+  NORMALIZE --> STORE
+  NORMALIZE --> CONTEXT
   CONTEXT --> UI
-  LS --> History
 ```
 
-3) Caching & persistence lifecycle
+---
 
-```mermaid
-sequenceDiagram
-  participant App
-  participant DP as DataProvider
-  participant LS as localStorage
-  participant API
-  App->>DP: on load
-  DP->>LS: read vd:lastFetch
-  alt cache fresh (<24h)
-    LS-->>DP: return vd:lastPayload
-    DP-->>App: provide payload
-  else cache stale/missing
-    DP->>API: GET /testing/getdata
-    API-->>DP: payload (maybe envelope)
-    DP->>DP: parse & normalize
-    DP->>LS: set vd:lastPayload and vd:lastFetch
-    DP->>LS: unshift into vd:reports (prune / cap)
-    DP-->>App: provide normalized payload
-  end
+## Caching Mechanism
+
+The application uses **browser localStorage** to avoid repeated API calls.
+
+Stored keys:
+
+| Key              | Purpose                                  |
+| ---------------- | ---------------------------------------- |
+| `vd:lastPayload` | Latest normalized payload                |
+| `vd:lastFetch`   | Timestamp of last successful API request |
+| `vd:reports`     | Historical reports list                  |
+
+Cache policy:
+
+* If data was fetched **within the last 24 hours**, the cached payload is used.
+* Otherwise the application calls the API again.
+
+---
+
+## Vulnerability Data Normalization
+
+Incoming API responses may contain vulnerability data nested inside a report structure.
+
+The normalization layer converts the raw payload into two internal types:
+
+### Report summary
+
+```
+{
+  item_type: "report_summary",
+  scan_start,
+  report_id,
+  total_high_severity_count
+}
 ```
 
-## Where to place screenshots in your report
+### Vulnerability finding
 
-Place all screenshots under the `docs/screenshots` directory and reference them from your report or README using relative links. The project already contains `docs/screenshots/README.md` with naming guidance.
+```
+{
+  item_type: "finding",
+  name,
+  host,
+  port,
+  severity,
+  cvss,
+  cves
+}
+```
 
-Recommended section:
+This ensures UI components can render data consistently regardless of the API structure.
 
-```markdown
+---
+
+## Export and Reporting
+
+The dashboard supports exporting vulnerability findings as **CSV files**.
+
+Export is implemented entirely client-side using the **Blob API**.
+
+Printing is supported using the browser’s built-in:
+
+```
+window.print()
+```
+
+---
+
+## Operational Considerations
+
+* localStorage has limited storage capacity
+* very large payloads may exceed browser quota
+* pruning keeps only **30 days of reports** and **maximum 500 items**
+
+For multi-user environments, a backend database would be required.
+
+---
+
 ## Screenshots
 
 <p align="center">
-  <b>Overview Dashboard (Desktop)</b><br><br>
-  <img src="./docs/screenshots/overview-desktop.png" alt="Overview dashboard" width="900">
+<b>Overview Dashboard (Desktop)</b><br><br>
+<img src="./docs/screenshots/overview-desktop.png" width="900">
 </p>
 
 <br>
 
 <p align="center">
-  <b>Vulnerabilities Table (Desktop)</b><br><br>
-  <img src="./docs/screenshots/vulnerabilities-desktop.png" alt="Vulnerabilities desktop table" width="900">
+<b>Vulnerabilities Table (Desktop)</b><br><br>
+<img src="./docs/screenshots/vulnerabilities-desktop.png" width="900">
 </p>
 
 <br>
 
 <p align="center">
-  <b>Vulnerabilities View (Mobile)</b><br><br>
-  <img src="./docs/screenshots/vulnerabilities-mobile.png" alt="Vulnerabilities mobile view" width="400">
+<b>Vulnerabilities View (Mobile)</b><br><br>
+<img src="./docs/screenshots/vulnerabilities-mobile.png" width="400">
 </p>
 
 <br>
 
 <p align="center">
-  <b>Assets Inventory</b><br><br>
-  <img src="./docs/screenshots/assets-inventory.png" alt="Assets inventory view" width="900">
+<b>Assets Inventory</b><br><br>
+<img src="./docs/screenshots/assets-inventory.png" width="900">
 </p>
 
 <br>
 
 <p align="center">
-  <b>History – Saved Report Example</b><br><br>
-  <img src="./docs/screenshots/history-report.png" alt="History report example" width="900">
+<b>History – Saved Report Example</b><br><br>
+<img src="./docs/screenshots/history-report.png" width="900">
 </p>
-```
+
+---
+
+## Future Improvements
+
+Planned enhancements:
+
+1. Sparkline charts for historical trends
+2. History filtering by date range
+3. Report comparison view
+4. Server-backed report storage
+5. Automated unit tests for data normalization
+6. CI pipeline for build validation
+
+---
+
+## Tech Stack
+
+* React
+* Chart.js
+* React ChartJS 2
+* JavaScript (ES6+)
+* HTML / CSS
+* Browser localStorage
+
+---
+
+## License
+
+This project is intended for **educational and demonstration purposes**.
