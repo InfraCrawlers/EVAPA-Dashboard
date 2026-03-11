@@ -200,18 +200,36 @@ Recommended section:
 ```markdown
 ## Screenshots
 
-Overview (desktop):
-![Overview desktop](.docs/screenshots/overview-desktop.png)
+<p align="center">
+  <b>Overview Dashboard (Desktop)</b><br><br>
+  <img src="./docs/screenshots/overview-desktop.png" alt="Overview dashboard" width="900">
+</p>
 
-Vulnerabilities (desktop table):
-![Vulnerabilities desktop](.docs/screenshots/vulnerabilities-desktop.png)
+<br>
 
-Vulnerabilities (mobile):
-![Vulnerabilities mobile](.docs/screenshots/vulnerabilities-mobile.png)
+<p align="center">
+  <b>Vulnerabilities Table (Desktop)</b><br><br>
+  <img src="./docs/screenshots/vulnerabilities-desktop.png" alt="Vulnerabilities desktop table" width="900">
+</p>
 
-Assets inventory:
-![Assets inventory](.docs/screenshots/assets-inventory.png)
+<br>
 
-History (example saved report):
-![History report](.docs/screenshots/history-report.png)
+<p align="center">
+  <b>Vulnerabilities View (Mobile)</b><br><br>
+  <img src="./docs/screenshots/vulnerabilities-mobile.png" alt="Vulnerabilities mobile view" width="400">
+</p>
+
+<br>
+
+<p align="center">
+  <b>Assets Inventory</b><br><br>
+  <img src="./docs/screenshots/assets-inventory.png" alt="Assets inventory view" width="900">
+</p>
+
+<br>
+
+<p align="center">
+  <b>History – Saved Report Example</b><br><br>
+  <img src="./docs/screenshots/history-report.png" alt="History report example" width="900">
+</p>
 ```
