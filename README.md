@@ -201,17 +201,17 @@ Recommended section:
 ## Screenshots
 
 Overview (desktop):
-![Overview desktop](docs/screenshots/overview-desktop.png)
+![Overview desktop](.docs/screenshots/overview-desktop.png)
 
 Vulnerabilities (desktop table):
-![Vulnerabilities desktop](docs/screenshots/vulnerabilities-desktop.png)
+![Vulnerabilities desktop](.docs/screenshots/vulnerabilities-desktop.png)
 
 Vulnerabilities (mobile):
-![Vulnerabilities mobile](docs/screenshots/vulnerabilities-mobile.png)
+![Vulnerabilities mobile](.docs/screenshots/vulnerabilities-mobile.png)
 
 Assets inventory:
-![Assets inventory](docs/screenshots/assets-inventory.png)
+![Assets inventory](.docs/screenshots/assets-inventory.png)
 
 History (example saved report):
-![History report](docs/screenshots/history-report.png)
+![History report](.docs/screenshots/history-report.png)
 ```
