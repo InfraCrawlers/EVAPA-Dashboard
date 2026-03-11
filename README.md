@@ -1,52 +1,53 @@
 # Vulnerability Dashboard
 
 A lightweight React-based dashboard for visualizing vulnerability scan data.
-The application fetches security scan reports, normalizes them into a consistent format, and provides interactive views for analysis, reporting, and historical tracking.
+The application fetches vulnerability scan reports, normalizes them into a consistent structure, and provides interactive views for analyzing security findings, assets, and historical trends.
 
-The system is designed to operate **without requiring a backend server**, using browser-based storage and caching for persistence.
-
----
-
-## Features
-
-* 24-hour API caching to avoid unnecessary requests
-* Automatic vulnerability data normalization
-* Historical report tracking stored in browser localStorage
-* Overview dashboard with KPIs and visual charts
-* Searchable vulnerability findings
-* Host / asset inventory view
-* CSV export for vulnerability reports
-* Print-friendly report generation
-* Mobile responsive vulnerability views
+The dashboard is designed to operate **without requiring a backend server**, relying on browser storage and intelligent caching to manage report data efficiently.
 
 ---
 
-## Quick Start
+# Features
 
-### Prerequisites
+* **24-hour API caching** to prevent repeated API calls
+* **Automatic vulnerability data normalization**
+* **Historical report tracking** stored in browser `localStorage`
+* **Overview dashboard** with KPIs and vulnerability statistics
+* **Severity distribution charts**
+* **Searchable vulnerability findings**
+* **Asset inventory view**
+* **CSV export for findings**
+* **Print-ready reports**
+* **Responsive mobile layout**
+
+---
+
+# Quick Start
+
+## Prerequisites
 
 * Node.js **16+**
 * npm
 
-### Install dependencies
+## Install dependencies
 
 ```bash
 npm install
 ```
 
-### Start the development server
+## Run the development server
 
 ```bash
 npm start
 ```
 
-The app will run locally and store data in the browser using **localStorage**.
+The application will start locally and store report data in **browser localStorage**.
 
 No backend server is required.
 
 ---
 
-## Project Structure
+# Project Structure
 
 ```
 src/
@@ -73,22 +74,35 @@ docs/
 
 ---
 
-## Core Components
+# Core Components
 
-### `src/dataContext.js`
+## `src/dataContext.js`
 
-Handles:
+Responsible for:
 
 * API data fetching
-* Caching logic
-* Payload normalization
-* localStorage persistence
+* 24-hour caching
+* payload normalization
+* report persistence
+* managing application state via React Context
 
-### `Dashboard.js`
+Local storage keys used:
 
-Defines the application shell and routing between views.
+| Key              | Purpose                    |
+| ---------------- | -------------------------- |
+| `vd:lastPayload` | latest normalized payload  |
+| `vd:lastFetch`   | timestamp of last API call |
+| `vd:reports`     | saved historical reports   |
 
-### `Overview.js`
+---
+
+## `Dashboard.js`
+
+Defines the **application shell and navigation routes**.
+
+---
+
+## `Overview.js`
 
 Displays:
 
@@ -96,42 +110,56 @@ Displays:
 * severity distribution
 * historical vulnerability statistics
 
-### `Charts.js`
+---
 
-Wrapper components built using:
+## `Charts.js`
 
-* `chart.js`
-* `react-chartjs-2`
+Visualization layer built with:
 
-### `Vulnerabilities.js`
+* **Chart.js**
+* **react-chartjs-2**
 
-Provides:
+Charts include:
+
+* Severity pie chart
+* CVSS distribution bar chart
+
+---
+
+## `Vulnerabilities.js`
+
+Implements:
 
 * searchable vulnerability table
 * pagination
 * CSV export
-* modal details view
-* responsive mobile layout
-
-### `AssetsInventory.js`
-
-Displays asset-level vulnerability data.
-
-### `History.js`
-
-Displays previously saved scan reports stored locally.
+* modal vulnerability details
+* mobile responsive cards
 
 ---
 
-## Architecture Overview
+## `AssetsInventory.js`
+
+Displays **host-based vulnerability data** grouped by asset.
+
+---
+
+## `History.js`
+
+Displays historical scan reports stored in browser local storage.
+
+---
+
+# Architecture Overview
 
 ```mermaid
 flowchart LR
   API[External API /testing/getdata]
-  DP[DataProvider - dataContext.js]
-  LS[localStorage]
+  DP[DataProvider - src/dataContext.js]
+  LS[localStorage - vd:lastPayload vd:reports]
   Context[React Context]
   Overview[Overview Page]
+  Charts[Charts]
   Vuln[Vulnerabilities Page]
   Assets[Assets Inventory]
   History[History Page]
@@ -142,57 +170,95 @@ flowchart LR
   Context --> Overview
   Context --> Vuln
   Context --> Assets
+  Context --> Charts
   History --> LS
 ```
 
 ---
 
-## Data Flow
+# Component Interaction
+
+This diagram illustrates how React Context distributes data to the UI components.
+
+```mermaid
+graph LR
+  DP[DataProvider]
+  Context[App Context]
+  Dashboard[Dashboard Shell]
+  Overview[Overview]
+  Vuln[Vulnerabilities]
+  Assets[AssetsInventory]
+  History[History]
+
+  DP --> Context
+  Context --> Dashboard
+  Dashboard --> Overview
+  Dashboard --> Vuln
+  Dashboard --> Assets
+  Dashboard --> History
+```
+
+---
+
+# Data Flow
+
+The dashboard processes incoming vulnerability scan reports before presenting them in the UI.
 
 ```mermaid
 flowchart TD
-  API[External API]
-  PARSE[Parse API response]
-  NORMALIZE[Normalize data]
-  STORE[Store in localStorage]
+  API[External API /testing/getdata]
+  HTTP_ENV[Optional HTTP Envelope with body]
+  PARSE[Parse JSON]
+  NORMALIZE[Normalize Vulnerability Data]
+  LS[Store in localStorage]
   CONTEXT[React Context State]
   UI[Dashboard Components]
 
-  API --> PARSE
+  API --> HTTP_ENV
+  HTTP_ENV --> PARSE
   PARSE --> NORMALIZE
-  NORMALIZE --> STORE
+  NORMALIZE --> LS
   NORMALIZE --> CONTEXT
   CONTEXT --> UI
 ```
 
 ---
 
-## Caching Mechanism
+# Caching & Persistence Lifecycle
 
-The application uses **browser localStorage** to avoid repeated API calls.
+```mermaid
+sequenceDiagram
+  participant App
+  participant DataProvider
+  participant LocalStorage
+  participant API
 
-Stored keys:
+  App->>DataProvider: Application Load
 
-| Key              | Purpose                                  |
-| ---------------- | ---------------------------------------- |
-| `vd:lastPayload` | Latest normalized payload                |
-| `vd:lastFetch`   | Timestamp of last successful API request |
-| `vd:reports`     | Historical reports list                  |
+  DataProvider->>LocalStorage: Read vd:lastFetch
 
-Cache policy:
-
-* If data was fetched **within the last 24 hours**, the cached payload is used.
-* Otherwise the application calls the API again.
+  alt Cache Fresh (<24 hours)
+      LocalStorage-->>DataProvider: Return cached payload
+      DataProvider-->>App: Provide cached data
+  else Cache Expired
+      DataProvider->>API: GET /testing/getdata
+      API-->>DataProvider: Response payload
+      DataProvider->>DataProvider: Normalize data
+      DataProvider->>LocalStorage: Save payload + timestamp
+      DataProvider->>LocalStorage: Update vd:reports history
+      DataProvider-->>App: Provide normalized data
+  end
+```
 
 ---
 
-## Vulnerability Data Normalization
+# Vulnerability Data Normalization
 
-Incoming API responses may contain vulnerability data nested inside a report structure.
+Incoming API responses may contain vulnerability data nested inside report objects.
 
-The normalization layer converts the raw payload into two internal types:
+The normalization layer converts the payload into two internal structures.
 
-### Report summary
+## Report Summary Object
 
 ```
 {
@@ -203,7 +269,7 @@ The normalization layer converts the raw payload into two internal types:
 }
 ```
 
-### Vulnerability finding
+## Vulnerability Finding Object
 
 ```
 {
@@ -212,22 +278,23 @@ The normalization layer converts the raw payload into two internal types:
   host,
   port,
   severity,
+  severity_num,
   cvss,
   cves
 }
 ```
 
-This ensures UI components can render data consistently regardless of the API structure.
+Each item retains the original object inside a **`raw` field** for full traceability.
 
 ---
 
-## Export and Reporting
+# Export & Reporting
 
 The dashboard supports exporting vulnerability findings as **CSV files**.
 
-Export is implemented entirely client-side using the **Blob API**.
+Exports are generated entirely on the client side using the **Blob API**.
 
-Printing is supported using the browser’s built-in:
+Printing support is implemented using the browser method:
 
 ```
 window.print()
@@ -235,17 +302,20 @@ window.print()
 
 ---
 
-## Operational Considerations
+# Operational Considerations
 
-* localStorage has limited storage capacity
-* very large payloads may exceed browser quota
-* pruning keeps only **30 days of reports** and **maximum 500 items**
+* `localStorage` is used for persistence
+* browser storage limits may restrict extremely large payloads
+* historical reports are automatically pruned to:
 
-For multi-user environments, a backend database would be required.
+  * **30 days retention**
+  * **maximum 500 stored reports**
+
+For multi-user deployments, a centralized backend database would be recommended.
 
 ---
 
-## Screenshots
+# Screenshots
 
 <p align="center">
 <b>Overview Dashboard (Desktop)</b><br><br>
@@ -282,30 +352,30 @@ For multi-user environments, a backend database would be required.
 
 ---
 
-## Future Improvements
+# Future Improvements
 
-Planned enhancements:
+Planned enhancements include:
 
 1. Sparkline charts for historical trends
-2. History filtering by date range
-3. Report comparison view
-4. Server-backed report storage
-5. Automated unit tests for data normalization
-6. CI pipeline for build validation
+2. Advanced filtering in History view
+3. Report comparison features
+4. Backend storage integration
+5. Unit testing for normalization logic
+6. Continuous integration pipeline
 
 ---
 
-## Tech Stack
+# Technology Stack
 
-* React
-* Chart.js
-* React ChartJS 2
-* JavaScript (ES6+)
-* HTML / CSS
-* Browser localStorage
+* **React**
+* **Chart.js**
+* **react-chartjs-2**
+* **JavaScript (ES6+)**
+* **HTML / CSS**
+* **Browser localStorage**
 
 ---
 
-## License
+# License
 
 This project is intended for **educational and demonstration purposes**.
