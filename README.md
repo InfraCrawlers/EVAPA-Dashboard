@@ -44,14 +44,14 @@ Mermaid diagram:
 ```mermaid
 flowchart LR
   API[External API /testing/getdata]
-  DP[DataProvider (`src/dataContext.js`)]
-  LS[localStorage (`vd:lastPayload`, `vd:reports`)]
+  DP[DataProvider - src/dataContext.js]
+  LS[localStorage - vd:lastPayload, vd:reports]
   Context[React Context]
-  Overview[`Overview`]
-  Charts[`Charts`]
-  Vuln[`Vulnerabilities`]
-  Assets[`AssetsInventory`]
-  History[`History`]
+  Overview[Overview]
+  Charts[Charts]
+  Vuln[Vulnerabilities]
+  Assets[AssetsInventory]
+  History[History]
   API -->|GET /testing/getdata| DP
   DP -->|cache & persist| LS
   DP --> Context
@@ -152,11 +152,11 @@ graph LR
 
 ```mermaid
 flowchart TD
-  API[External API (/testing/getdata)]
-  HTTP_ENV[Optional HTTP Envelope with `body`]
-  PARSE[Parse JSON & normalize]
+  API[External API /testing/getdata]
+  HTTP_ENV[Optional HTTP Envelope with body]
+  PARSE[Parse JSON and normalize]
   NORM[Normalized items: report_summary + finding]
-  LS[localStorage `vd:lastPayload`, `vd:reports`]
+  LS[localStorage - vd:lastPayload, vd:reports]
   CONTEXT[React Context / DataProvider state]
   UI[Overview / Vulnerabilities / Assets / History]
   API --> HTTP_ENV
@@ -177,16 +177,16 @@ sequenceDiagram
   participant LS as localStorage
   participant API
   App->>DP: on load
-  DP->>LS: read `vd:lastFetch`
+  DP->>LS: read vd:lastFetch
   alt cache fresh (<24h)
-    LS-->>DP: return `vd:lastPayload`
+    LS-->>DP: return vd:lastPayload
     DP-->>App: provide payload
   else cache stale/missing
     DP->>API: GET /testing/getdata
     API-->>DP: payload (maybe envelope)
     DP->>DP: parse & normalize
-    DP->>LS: set `vd:lastPayload`, set `vd:lastFetch`
-    DP->>LS: unshift into `vd:reports` (prune / cap)
+    DP->>LS: set vd:lastPayload and vd:lastFetch
+    DP->>LS: unshift into vd:reports (prune / cap)
     DP-->>App: provide normalized payload
   end
 ```
@@ -201,24 +201,24 @@ Recommended section:
 ## Screenshots
 
 Overview (desktop):
-![Overview desktop](docs/screenshots/overview-desktop.png)
+![Overview desktop](docs/screenshots/overview-desktop.svg)
 
 Vulnerabilities (desktop table):
-![Vulnerabilities desktop](docs/screenshots/vulnerabilities-desktop.png)
+![Vulnerabilities desktop](docs/screenshots/vulnerabilities-desktop.svg)
 
 Vulnerabilities (mobile):
-![Vulnerabilities mobile](docs/screenshots/vulnerabilities-mobile.png)
+![Vulnerabilities mobile](docs/screenshots/vulnerabilities-mobile.svg)
 
 Assets inventory:
-![Assets inventory](docs/screenshots/assets-inventory.png)
+![Assets inventory](docs/screenshots/assets-inventory.svg)
 
 History (example saved report):
-![History report](docs/screenshots/history-report.png)
+![History report](docs/screenshots/history-report-20250316.svg)
 ```
 
 Filename conventions (exact):
-- `overview-desktop.png`
-- `vulnerabilities-desktop.png`
-- `vulnerabilities-mobile.png`
-- `assets-inventory.png`
-- `history-report.png`
+- `overview-desktop.svg` or `overview-desktop.png`
+- `vulnerabilities-desktop.svg` or `vulnerabilities-desktop.png`
+- `vulnerabilities-mobile.svg` or `vulnerabilities-mobile.png`
+- `assets-inventory.svg` or `assets-inventory.png`
+- `history-report-YYYYMMDD.svg` or `history-report-YYYYMMDD.png`
