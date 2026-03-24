@@ -317,6 +317,278 @@ app.get('/health', (req, res) => {
 });
 
 /**
+ * ==========================================
+ * OPENVAS API ROUTES
+ * ==========================================
+ */
+
+const OPENVAS_API = 'https://edonu024me.execute-api.us-east-1.amazonaws.com/v1';
+
+/**
+ * POST /openvas/port-lists - Create a new port list
+ */
+app.post('/openvas/port-lists', async (req, res) => {
+  try {
+    const { name, port_range } = req.body;
+    
+    if (!name || !port_range) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: name, port_range' 
+      });
+    }
+
+    const response = await axios.post(
+      `${OPENVAS_API}/port-lists`,
+      { name, port_range },
+      { timeout: 10000 }
+    );
+
+    // Invalidate port lists cache
+    await cache.invalidate('openvas:port-lists:*');
+    
+    console.log(`✅ OpenVAS Port List created: ${name}`);
+    res.json({ ...response.data, created: true });
+  } catch (error) {
+    console.error('❌ OpenVAS Port List creation failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to create port list',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /openvas/port-lists - Get all port lists with caching
+ */
+app.get('/openvas/port-lists', async (req, res) => {
+  try {
+    const cacheKey = 'openvas:port-lists:all';
+    
+    // Try cache first
+    let data = await cache.get(cacheKey);
+    if (data) {
+      console.log('✅ Cache HIT: OpenVAS port lists');
+      return res.json({ ...data, source: 'cache' });
+    }
+
+    console.log('❌ Cache MISS: OpenVAS port lists, fetching...');
+    const response = await axios.get(`${OPENVAS_API}/port-lists`, { timeout: 10000 });
+    
+    // Cache the response (15 minutes TTL)
+    await cache.set(cacheKey, response.data, 900);
+    
+    res.json({ ...response.data, source: 'openvas' });
+  } catch (error) {
+    console.error('❌ OpenVAS Port Lists fetch failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch port lists',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /openvas/targets - Create a new target
+ */
+app.post('/openvas/targets', async (req, res) => {
+  try {
+    const { name, hosts, port_list_name } = req.body;
+    
+    if (!name || !hosts || !port_list_name) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: name, hosts, port_list_name' 
+      });
+    }
+
+    const response = await axios.post(
+      `${OPENVAS_API}/targets`,
+      { name, hosts, port_list_name },
+      { timeout: 10000 }
+    );
+
+    // Invalidate targets cache
+    await cache.invalidate('openvas:targets:*');
+    
+    console.log(`✅ OpenVAS Target created: ${name}`);
+    res.json({ ...response.data, created: true });
+  } catch (error) {
+    console.error('❌ OpenVAS Target creation failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to create target',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /openvas/targets - Get all targets with caching
+ */
+app.get('/openvas/targets', async (req, res) => {
+  try {
+    const cacheKey = 'openvas:targets:all';
+    
+    // Try cache first
+    let data = await cache.get(cacheKey);
+    if (data) {
+      console.log('✅ Cache HIT: OpenVAS targets');
+      return res.json({ ...data, source: 'cache' });
+    }
+
+    console.log('❌ Cache MISS: OpenVAS targets, fetching...');
+    const response = await axios.get(`${OPENVAS_API}/targets`, { timeout: 10000 });
+    
+    // Cache the response (15 minutes TTL)
+    await cache.set(cacheKey, response.data, 900);
+    
+    res.json({ ...response.data, source: 'openvas' });
+  } catch (error) {
+    console.error('❌ OpenVAS Targets fetch failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch targets',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /openvas/tasks - Create a new scan task
+ */
+app.post('/openvas/tasks', async (req, res) => {
+  try {
+    const { name, target_name, config_name, scanner_name } = req.body;
+    
+    if (!name || !target_name) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: name, target_name' 
+      });
+    }
+
+    const response = await axios.post(
+      `${OPENVAS_API}/tasks`,
+      { 
+        name, 
+        target_name, 
+        config_name: config_name || 'Full and fast',
+        scanner_name: scanner_name || 'OpenVAS Scanner'
+      },
+      { timeout: 10000 }
+    );
+
+    // Invalidate tasks cache
+    await cache.invalidate('openvas:tasks:*');
+    
+    console.log(`✅ OpenVAS Task created: ${name}`);
+    res.json({ ...response.data, created: true });
+  } catch (error) {
+    console.error('❌ OpenVAS Task creation failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to create task',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /openvas/tasks - Get all scan tasks with caching
+ */
+app.get('/openvas/tasks', async (req, res) => {
+  try {
+    const cacheKey = 'openvas:tasks:all';
+    
+    // Try cache first (shorter TTL for tasks since progress changes)
+    let data = await cache.get(cacheKey);
+    if (data) {
+      console.log('✅ Cache HIT: OpenVAS tasks');
+      return res.json({ ...data, source: 'cache' });
+    }
+
+    console.log('❌ Cache MISS: OpenVAS tasks, fetching...');
+    const response = await axios.get(`${OPENVAS_API}/tasks`, { timeout: 10000 });
+    
+    // Cache the response (5 minutes TTL for tasks - changes frequently)
+    await cache.set(cacheKey, response.data, 300);
+    
+    res.json({ ...response.data, source: 'openvas' });
+  } catch (error) {
+    console.error('❌ OpenVAS Tasks fetch failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch tasks',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /openvas/task-progress/:taskName - Get task progress details
+ */
+app.get('/openvas/task-progress/:taskName', async (req, res) => {
+  try {
+    const { taskName } = req.params;
+    const decodedName = decodeURIComponent(taskName);
+    const cacheKey = `openvas:task-progress:${decodedName}`;
+    
+    // Try cache first (1 minute TTL for progress - real-time)
+    let data = await cache.get(cacheKey);
+    if (data) {
+      console.log(`✅ Cache HIT: Task progress for ${decodedName}`);
+      return res.json({ ...data, source: 'cache' });
+    }
+
+    console.log(`❌ Cache MISS: Task progress for ${decodedName}, fetching...`);
+    const response = await axios.get(
+      `${OPENVAS_API}/tasks?name=${encodeURIComponent(decodedName)}`,
+      { timeout: 10000 }
+    );
+    
+    // Cache the response (1 minute TTL)
+    await cache.set(cacheKey, response.data, 60);
+    
+    res.json({ ...response.data, source: 'openvas' });
+  } catch (error) {
+    console.error('❌ OpenVAS Task Progress fetch failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch task progress',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /openvas/tasks/:taskName/start - Start a scan for a task
+ */
+app.post('/openvas/tasks/:taskName/start', async (req, res) => {
+  try {
+    const { taskName } = req.params;
+    const decodedName = decodeURIComponent(taskName);
+    
+    const response = await axios.post(
+      `${OPENVAS_API}/tasks/${encodeURIComponent(decodedName)}/start`,
+      {},
+      { timeout: 10000 }
+    );
+
+    // Invalidate task caches
+    await cache.invalidate('openvas:tasks:*');
+    await cache.invalidate(`openvas:task-progress:${decodedName}`);
+    
+    console.log(`✅ OpenVAS Scan started for task: ${decodedName}`);
+    res.json({ ...response.data, scan_started: true });
+  } catch (error) {
+    console.error('❌ OpenVAS Scan start failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to start scan',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * ==========================================
+ * END OPENVAS API ROUTES
+ * ==========================================
+ */
+
+/**
  * GET /api/* - Proxy all other requests to AWS
  */
 app.get('/api/*', async (req, res) => {
