@@ -671,32 +671,6 @@ npm start
 
 ---
 
-## 🎯 Roadmap
-
-### Completed ✅
-- [x] Redis caching integration
-- [x] Graceful degradation with demo mode
-- [x] Automated patching & scanning
-- [x] CSV export
-- [x] Print-ready reports
-- [x] Mobile responsive design
-
-### In Progress 🔄
-- [ ] Database persistence (PostgreSQL/DynamoDB)
-- [ ] User authentication (OAuth/LDAP)
-- [ ] Role-based access control
-- [ ] Advanced filtering and sorting
-
-### Planned 📋
-- [ ] Real-time WebSocket updates
-- [ ] Email notifications
-- [ ] Custom dashboard widgets
-- [ ] Remediation workflow automation
-- [ ] Integration with SOAR platforms
-- [ ] Machine learning for risk prediction
-
----
-
 ## 📊 Technology Stack
 
 ### Frontend
