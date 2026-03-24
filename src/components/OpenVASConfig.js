@@ -188,10 +188,10 @@ export default function OpenVASConfig() {
           <p className="empty-state">No port lists found. Create one to get started!</p>
         ) : (
           portLists.map((port) => (
-            <div key={port.port_list_id} className="ovconfig-card">
+            <div key={port.id || port.port_list_id} className="ovconfig-card">
               <div className="card-title">{port.name}</div>
               <div className="card-info">
-                <small>ID: {port.port_list_id.substring(0, 8)}...</small>
+                <small>ID: {(port.id || port.port_list_id)?.substring(0, 8) || 'N/A'}...</small>
               </div>
             </div>
           ))
@@ -238,7 +238,7 @@ export default function OpenVASConfig() {
             >
               <option value="">-- Select Port List --</option>
               {portLists.map((port) => (
-                <option key={port.port_list_id} value={port.name}>
+                <option key={port.id || port.port_list_id} value={port.name}>
                   {port.name}
                 </option>
               ))}
@@ -255,7 +255,7 @@ export default function OpenVASConfig() {
           <p className="empty-state">No targets found. Create one to scan assets!</p>
         ) : (
           targets.map((target) => (
-            <div key={target.target_id} className="ovconfig-card">
+            <div key={target.id || target.target_id} className="ovconfig-card">
               <div className="card-title">{target.name}</div>
               <div className="card-info">
                 <small>📍 Hosts: {target.hosts?.length || 0}</small>
@@ -297,7 +297,7 @@ export default function OpenVASConfig() {
             >
               <option value="">-- Select Target --</option>
               {targets.map((target) => (
-                <option key={target.target_id} value={target.name}>
+                <option key={target.id || target.target_id} value={target.name}>
                   {target.name}
                 </option>
               ))}
@@ -325,7 +325,7 @@ export default function OpenVASConfig() {
           <p className="empty-state">No scan tasks found. Create one to begin scanning!</p>
         ) : (
           tasks.map((task) => (
-            <div key={task.task_id} className="ovconfig-task-card">
+            <div key={task.id || task.task_id} className="ovconfig-task-card">
               <div className="task-header">
                 <div className="task-title">{task.name}</div>
                 <div className="task-status" style={{ color: getStatusColor(task.status) }}>
@@ -334,8 +334,8 @@ export default function OpenVASConfig() {
               </div>
 
               <div className="task-info">
-                <small>Target: {task.target}</small>
-                <small>Config: {task.config}</small>
+                <small>Target: {task.target_name || task.target || 'Unknown'}</small>
+                <small>Config: {task.config_name || task.config || 'Standard'}</small>
               </div>
 
               <div className="task-progress-container">
