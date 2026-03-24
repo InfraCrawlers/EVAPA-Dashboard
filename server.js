@@ -323,6 +323,17 @@ app.get('/health', (req, res) => {
  */
 
 const OPENVAS_API = 'https://edonu024me.execute-api.us-east-1.amazonaws.com/v1';
+const OPENVAS_API_KEY = process.env.OPENVAS_API_KEY || 'gmp_token';
+
+// Create axios instance with OpenVAS authentication
+const openvasClient = axios.create({
+  baseURL: OPENVAS_API,
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `ApiKey ${OPENVAS_API_KEY}`
+  }
+});
 
 /**
  * POST /openvas/port-lists - Create a new port list
@@ -337,11 +348,7 @@ app.post('/openvas/port-lists', async (req, res) => {
       });
     }
 
-    const response = await axios.post(
-      `${OPENVAS_API}/port-lists`,
-      { name, port_range },
-      { timeout: 10000 }
-    );
+    const response = await openvasClient.post('/port-lists', { name, port_range });
 
     // Invalidate port lists cache
     await cache.invalidate('openvas:port-lists:*');
@@ -372,7 +379,7 @@ app.get('/openvas/port-lists', async (req, res) => {
     }
 
     console.log('❌ Cache MISS: OpenVAS port lists, fetching...');
-    const response = await axios.get(`${OPENVAS_API}/port-lists`, { timeout: 10000 });
+    const response = await openvasClient.get('/port-lists');
     
     // Cache the response (15 minutes TTL)
     await cache.set(cacheKey, response.data, 900);
@@ -400,11 +407,7 @@ app.post('/openvas/targets', async (req, res) => {
       });
     }
 
-    const response = await axios.post(
-      `${OPENVAS_API}/targets`,
-      { name, hosts, port_list_name },
-      { timeout: 10000 }
-    );
+    const response = await openvasClient.post('/targets', { name, hosts, port_list_name });
 
     // Invalidate targets cache
     await cache.invalidate('openvas:targets:*');
@@ -435,7 +438,7 @@ app.get('/openvas/targets', async (req, res) => {
     }
 
     console.log('❌ Cache MISS: OpenVAS targets, fetching...');
-    const response = await axios.get(`${OPENVAS_API}/targets`, { timeout: 10000 });
+    const response = await openvasClient.get('/targets');
     
     // Cache the response (15 minutes TTL)
     await cache.set(cacheKey, response.data, 900);
@@ -463,16 +466,12 @@ app.post('/openvas/tasks', async (req, res) => {
       });
     }
 
-    const response = await axios.post(
-      `${OPENVAS_API}/tasks`,
-      { 
-        name, 
-        target_name, 
-        config_name: config_name || 'Full and fast',
-        scanner_name: scanner_name || 'OpenVAS Scanner'
-      },
-      { timeout: 10000 }
-    );
+    const response = await openvasClient.post('/tasks', { 
+      name, 
+      target_name, 
+      config_name: config_name || 'Full and fast',
+      scanner_name: scanner_name || 'OpenVAS Scanner'
+    });
 
     // Invalidate tasks cache
     await cache.invalidate('openvas:tasks:*');
@@ -503,7 +502,7 @@ app.get('/openvas/tasks', async (req, res) => {
     }
 
     console.log('❌ Cache MISS: OpenVAS tasks, fetching...');
-    const response = await axios.get(`${OPENVAS_API}/tasks`, { timeout: 10000 });
+    const response = await openvasClient.get('/tasks');
     
     // Cache the response (5 minutes TTL for tasks - changes frequently)
     await cache.set(cacheKey, response.data, 300);
@@ -535,10 +534,7 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
     }
 
     console.log(`❌ Cache MISS: Task progress for ${decodedName}, fetching...`);
-    const response = await axios.get(
-      `${OPENVAS_API}/tasks?name=${encodeURIComponent(decodedName)}`,
-      { timeout: 10000 }
-    );
+    const response = await openvasClient.get(`/tasks?name=${encodeURIComponent(decodedName)}`);
     
     // Cache the response (1 minute TTL)
     await cache.set(cacheKey, response.data, 60);
@@ -564,7 +560,7 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
     
     // First, fetch all tasks to find the ID matching this name
     console.log(`🔍 Looking up task ID for: ${decodedName}`);
-    const tasksResponse = await axios.get(`${OPENVAS_API}/tasks`, { timeout: 10000 });
+    const tasksResponse = await openvasClient.get('/tasks');
     
     // Find task with matching name
     const targetTask = tasksResponse.data.tasks?.find(t => t.name === decodedName);
@@ -582,11 +578,7 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
     console.log(`✅ Found task ID: ${taskId} for name: ${decodedName}`);
     
     // Now start the scan using the task ID
-    const response = await axios.post(
-      `${OPENVAS_API}/tasks/${taskId}/start`,
-      {},
-      { timeout: 10000 }
-    );
+    const response = await openvasClient.post(`/tasks/${taskId}/start`, {});
 
     // Invalidate task caches
     await cache.invalidate('openvas:tasks:*');
