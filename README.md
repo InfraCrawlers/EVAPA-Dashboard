@@ -263,8 +263,8 @@ CACHE_TTL_FINDINGS=3600    # 1 hour
 CACHE_TTL_REPORTS=3600     # 1 hour
 CACHE_TTL_SYSTEMS=1800     # 30 minutes
 
-# AWS API
-AWS_API_ENDPOINT=https://k0lybp4tea.execute-api.us-east-1.amazonaws.com
+# AWS API (DynamoDB)
+AWS_API_ENDPOINT=https://7ayzyoa7fl.execute-api.us-east-1.amazonaws.com
 ```
 
 ### npm Scripts
