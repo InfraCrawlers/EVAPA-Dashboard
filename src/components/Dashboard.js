@@ -4,6 +4,7 @@ import Overview from './Overview'
 import Vulnerabilities from './Vulnerabilities'
 import AssetsInventory from './AssetsInventory'
 import History from './History'
+import Patching from './Patching'
 
 export default function Dashboard(){
   const { data, loading, error } = useData()
@@ -52,6 +53,10 @@ export default function Dashboard(){
             <span className="sidebar-emoji" aria-hidden="true">📜</span>
             <i className="fas fa-history sidebar-icon" aria-hidden="true"></i> History
           </button>
+          <button className={`sidebar-btn${activeTab==='patching'?' active':''}`} onClick={()=> setActiveTab('patching')}>
+            <span className="sidebar-emoji" aria-hidden="true">🔧</span>
+            <i className="fas fa-tools sidebar-icon" aria-hidden="true"></i> Patching
+          </button>
         </nav>
       </aside>
 
@@ -88,6 +93,8 @@ export default function Dashboard(){
             <AssetsInventory findings={findings} selectedHost={selectedHost} onSelectHost={(h)=>{ setSelectedHost(h); setActiveTab('assets') }} />
           ) : activeTab === 'history' ? (
             <History />
+          ) : activeTab === 'patching' ? (
+            <Patching />
           ) : null}
         </main>
         <footer className="footer">© 2026 Group 4 Capstone — Security Assessment Dashboard</footer>

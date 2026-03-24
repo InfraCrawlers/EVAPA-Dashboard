@@ -130,3 +130,87 @@ export function DataProvider({ children }){
 export function useData(){
   return useContext(DataContext)
 }
+
+// Patching context
+const PatchContext = createContext(null)
+
+export function usePatchAndScan(){
+  return useContext(PatchContext)
+}
+
+// Hook to use patching (exported for use in components)
+export function createPatchingHook(){
+  return ()=> {
+    const [patchLoading, setPatchLoading] = useState(false)
+    const [patchError, setPatchError] = useState(null)
+    const [patchStatus, setPatchStatus] = useState(null)
+
+    const triggerPatchAndScan = async (vmSelection = 'both') => {
+      setPatchLoading(true)
+      setPatchError(null)
+      setPatchStatus(`🔄 Starting patch deployment for ${vmSelection}...\n`)
+
+      try {
+        // Step 1: Trigger patching API
+        setPatchStatus((prev) => prev + `📦 Calling patch API for ${vmSelection}...\n`)
+        const patchRes = await axios.post('/patching/apply', {
+          vms: vmSelection, // 'both', 'windows', or 'linux'
+          timestamp: new Date().toISOString()
+        }, { timeout: 30000 })
+
+        setPatchStatus((prev) => prev + `✅ Patch API response received\n`)
+
+        if (!patchRes.data || !patchRes.data.success) {
+          throw new Error(patchRes.data?.message || 'Patching API failed')
+        }
+
+        // Step 2: Wait a bit for patches to apply
+        setPatchStatus((prev) => prev + `⏳ Waiting for patches to apply (30 seconds)...\n`)
+        await new Promise((resolve) => setTimeout(resolve, 30000))
+
+        // Step 3: Trigger OpenVAS scan
+        setPatchStatus((prev) => prev + `🔍 Starting OpenVAS scan...\n`)
+        const scanRes = await axios.post('/scanning/openvas-trigger', {
+          target: vmSelection,
+          timestamp: new Date().toISOString()
+        }, { timeout: 10000 })
+
+        if (!scanRes.data || !scanRes.data.success) {
+          throw new Error(scanRes.data?.message || 'OpenVAS scan trigger failed')
+        }
+
+        setPatchStatus(
+          (prev) =>
+            prev +
+            `✅ OpenVAS scan triggered successfully!\n\n` +
+            `📊 Scan is running in the background. Results will appear in Overview shortly.\n` +
+            `🔔 Check back in a few minutes to see updated findings.`
+        )
+
+        // Clear cache to force refresh on next page load
+        try {
+          localStorage.removeItem('vd:lastFetch')
+          localStorage.removeItem('vd:lastPayload')
+        } catch (e) { /* ignore */ }
+      } catch (err) {
+        const errorMsg = err.response?.data?.message || err.message || 'Unknown error'
+        setPatchError(errorMsg)
+        setPatchStatus((prev) => prev + `❌ Error: ${errorMsg}\n`)
+      } finally {
+        setPatchLoading(false)
+      }
+    }
+
+    return { triggerPatchAndScan, patchLoading, patchError, patchStatus }
+  }
+}
+
+// Provider component wrapper
+export function PatchingProvider({ children }) {
+  const hook = createPatchingHook()()
+  return (
+    <PatchContext.Provider value={hook}>
+      {children}
+    </PatchContext.Provider>
+  )
+}
