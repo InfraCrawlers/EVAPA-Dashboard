@@ -2,38 +2,10 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import axios from 'axios'
 import { generateMockDataForDemo } from './mockData'
 
-// Historical report persistence: store recent reports in localStorage for 30-day retention
-const LS_HISTORY_KEY = 'vd:reports'
-const RETENTION_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
-
-function readHistoricalReports(){
-  try{
-    const raw = localStorage.getItem(LS_HISTORY_KEY)
-    if(!raw) return []
-    return JSON.parse(raw)
-  }catch(e){ return [] }
-}
-
-function writeHistoricalReports(list){
-  try{ localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(list)) }catch(e){}
-}
-
-function persistToHistory(payload){
-  try{
-    const now = Date.now()
-    const id = `${now}-${Math.random().toString(36).slice(2,9)}`
-    const item = { id, created_at: now, payload }
-    const list = readHistoricalReports()
-    list.unshift(item)
-    // prune older than retention
-    const cutoff = Date.now() - RETENTION_MS
-    const pruned = list.filter(r => (r.created_at || 0) >= cutoff)
-    writeHistoricalReports(pruned.slice(0, 500)) // cap at 500 entries
-    return item
-  }catch(e){ return null }
-}
-
 const DataContext = createContext(null)
+
+// API Base URL - Redis-backed backend is REQUIRED
+const API_BASE_URL = 'http://localhost:5000'
 
 export function DataProvider({ children }){
   const [data, setData] = useState(null)
@@ -45,18 +17,20 @@ export function DataProvider({ children }){
     let cancelled = false
     async function fetchData(){
       try{
-        // Fetch from backend API with Redis caching
-        // Backend handles all caching — we just call it directly
-        const res = await axios.get('http://localhost:5000/api/findings', { timeout: 15000 })
+        // Fetch from Redis-backed backend API
+        // The backend checks Redis cache first, then hits AWS on miss
+        console.log('📡 Fetching vulnerability findings from backend API...')
+        const res = await axios.get(`${API_BASE_URL}/api/findings`, { timeout: 15000 })
         if(cancelled) return
-        
+
+        // Process response
         let payload = res.data
         if(payload && typeof payload.body === 'string'){
           try{ payload = JSON.parse(payload.body) }catch(e){ /* keep original */ }
         }
 
-        // Normalize the API response into internal format
-        // Converts various API shapes into: report_summary items + finding items
+        // Normalize the API shape: if payload is an array of report objects with `vulnerabilities`,
+        // transform to the internal format: array with a report_summary item and finding items.
         if(Array.isArray(payload)){
           try{
             const transformed = []
@@ -89,24 +63,24 @@ export function DataProvider({ children }){
             payload = transformed
           }catch(e){ /* fall back to original payload */ }
         }
-        
+
         if(!cancelled) {
           setData(payload)
           setDemoMode(false)
           setError(null)
+          console.log(`✅ Loaded ${payload.filter(x => x.item_type === 'finding').length} findings from backend`)
         }
-        
-        // Persist to history (30 days) — for Historical view
-        try{ persistToHistory(payload) }catch(e){}
-        
       }catch(err){ 
-        // Graceful degradation: On backend error, use demo data
+        // On API error, use fallback mock data
         if(!cancelled) {
-          console.warn('Failed to fetch from backend, using demo data:', err.message)
+          console.warn('⚠️ Backend API error, using demo data:', err.message)
+          console.warn('Make sure Redis and backend server are running:')
+          console.warn('  Redis:   docker compose up -d')
+          console.warn('  Backend: npm run server')
           const mockPayload = generateMockDataForDemo()
           setData(mockPayload)
           setDemoMode(true)
-          setError(null) // Don't show error, user sees demo mode instead
+          setError(null) // Don't show error since we have fallback data
         }
       }finally{ 
         if(!cancelled) setLoading(false) 
@@ -147,9 +121,9 @@ export function createPatchingHook(){
       setPatchStatus(`🔄 Starting patch deployment for ${vmSelection}...\n`)
 
       try {
-        // Step 1: Trigger patching API via backend
-        setPatchStatus((prev) => prev + `📦 Calling patch API for ${vmSelection}...\n`)
-        const patchRes = await axios.post('http://localhost:5000/patching/apply', {
+        // Step 1: Trigger patching API via backend (clears Redis cache)
+        setPatchStatus((prev) => prev + `📦 Calling patching API for ${vmSelection}...\n`)
+        const patchRes = await axios.post(`${API_BASE_URL}/patching/apply`, {
           vms: vmSelection, // 'both', 'windows', or 'linux'
           timestamp: new Date().toISOString()
         }, { timeout: 30000 })
@@ -164,9 +138,9 @@ export function createPatchingHook(){
         setPatchStatus((prev) => prev + `⏳ Waiting for patches to apply (30 seconds)...\n`)
         await new Promise((resolve) => setTimeout(resolve, 30000))
 
-        // Step 3: Trigger OpenVAS scan via backend
+        // Step 3: Trigger OpenVAS scan via backend (clears Redis cache)
         setPatchStatus((prev) => prev + `🔍 Starting OpenVAS scan...\n`)
-        const scanRes = await axios.post('http://localhost:5000/scanning/openvas-trigger', {
+        const scanRes = await axios.post(`${API_BASE_URL}/scanning/openvas-trigger`, {
           target: vmSelection,
           timestamp: new Date().toISOString()
         }, { timeout: 10000 })
@@ -179,14 +153,9 @@ export function createPatchingHook(){
           (prev) =>
             prev +
             `✅ OpenVAS scan triggered successfully!\n\n` +
-            `📊 Scan is running in the background. Results will appear in Overview shortly.\n` +
-            `🔔 Check back in a few minutes to see updated findings.`
+            `📊 Scan running in backend. Results will appear in Overview shortly.\n` +
+            `🔔 Redis cache has been cleared automatically. Check back to see updated findings.`
         )
-
-        // Clear server-side Redis cache to ensure fresh data
-        try {
-          await axios.post('http://localhost:5000/cache/clear', {}, { timeout: 5000 })
-        } catch (e) { /* ignore */ }
       } catch (err) {
         const errorMsg = err.response?.data?.message || err.message || 'Unknown error'
         setPatchError(errorMsg)

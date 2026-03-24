@@ -1,11 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
-const LS_KEY = 'vd:reports'
-
-function readLocalReports(){
-  try{ const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : [] }catch(e){ return [] }
-}
+const API_BASE_URL = 'http://localhost:5000'
 
 export default function History(){
   const [reports, setReports] = useState([])
@@ -17,19 +13,16 @@ export default function History(){
     async function fetchReports(){
       setLoading(true)
       try{
-        // Try server first, fall back to localStorage
-        try{
-          const res = await axios.get('http://localhost:4000/api/reports?limit=50', { timeout: 2000 })
-          if(!mounted) return
-          setReports(res.data.reports || [])
-          return
-        }catch(_){
-          // fallback to localStorage
-        }
+        // Fetch reports from Redis-backed backend
+        const res = await axios.get(`${API_BASE_URL}/api/reports?limit=50`, { timeout: 15000 })
         if(!mounted) return
-        setReports(readLocalReports())
+        setReports(res.data.data || [])
       }catch(err){
-        if(mounted) setError(err.message || 'Failed')
+        if(mounted) {
+          console.warn('Failed to fetch reports from backend:', err.message)
+          setError('Backend API unavailable. Make sure Redis and backend server are running.')
+          setReports([])
+        }
       }finally{
         if(mounted) setLoading(false)
       }
@@ -42,7 +35,7 @@ export default function History(){
     <div className="page">
       <header className="page-header">
         <h2>History</h2>
-        <p className="muted">Previously saved scan reports (local persistence)</p>
+        <p className="muted">Scan reports from last 30 days (Redis backed)</p>
       </header>
       <section>
         {loading && <p>Loading reports…</p>}

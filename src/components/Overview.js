@@ -1,10 +1,9 @@
 import React, { useMemo } from 'react'
 import Charts from './Charts'
 
-const LS_KEY = 'vd:reports'
-
+// Historical data now comes from backend API via dataContext
 function readLocalReports(){
-  try{ const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : [] }catch(e){ return [] }
+  return [] // No localStorage - data fetched from Redis backend
 }
 
 function toDayKey(ts){ const d = new Date(ts); d.setHours(0,0,0,0); return d.toISOString().slice(0,10) }
