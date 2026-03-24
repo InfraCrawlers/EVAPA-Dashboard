@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import axios from 'axios'
+import { generateMockDataForDemo } from './mockData'
 
 // Local persistence helper: store recent reports in localStorage under `vd:reports`.
 const LS_KEY = 'vd:reports'
@@ -41,6 +42,7 @@ export function DataProvider({ children }){
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [demoMode, setDemoMode] = useState(false)
 
   useEffect(()=>{
     let cancelled = false
@@ -53,7 +55,7 @@ export function DataProvider({ children }){
           const cachedRaw = localStorage.getItem(CACHE_KEY)
           if(cachedRaw){
             const cached = JSON.parse(cachedRaw)
-            if(!cancelled){ setData(cached); setLoading(false); }
+            if(!cancelled){ setData(cached); setDemoMode(false); setLoading(false); }
             return
           }
         }
@@ -105,6 +107,8 @@ export function DataProvider({ children }){
         }
         if(!cancelled) {
           setData(payload)
+          setDemoMode(false)
+          setError(null)
           // cache for 1 day
           try{ localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); localStorage.setItem(CACHE_TS, String(Date.now())) }catch(e){}
         }
@@ -114,14 +118,25 @@ export function DataProvider({ children }){
         ;(async function postReport() {
           try { await axios.post('http://localhost:4000/api/reports', payload, { timeout: 3000 }) } catch (e) { /* ignore */ }
         })()
-      }catch(err){ if(!cancelled) setError(err.message || 'Fetch error') }finally{ if(!cancelled) setLoading(false) }
+      }catch(err){ 
+        // On API error, use fallback mock data
+        if(!cancelled) {
+          console.warn('API fetch failed, using demo data:', err.message)
+          const mockPayload = generateMockDataForDemo()
+          setData(mockPayload)
+          setDemoMode(true)
+          setError(null) // Don't show error since we have fallback data
+        }
+      }finally{ 
+        if(!cancelled) setLoading(false) 
+      }
     }
     fetchData()
     return ()=>{ cancelled = true }
   },[])
 
   return (
-    <DataContext.Provider value={{data, loading, error}}>
+    <DataContext.Provider value={{data, loading, error, demoMode}}>
       {children}
     </DataContext.Provider>
   )

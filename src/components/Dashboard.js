@@ -7,13 +7,13 @@ import History from './History'
 import Patching from './Patching'
 
 export default function Dashboard(){
-  const { data, loading, error } = useData()
+  const { data, loading, error, demoMode } = useData()
   const [activeTab, setActiveTab] = useState('overview')
   const [selectedHost, setSelectedHost] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   if(loading) return <div className="app-loading">⏳ Loading vulnerability data...</div>
-  if(error) return <div className="app-error">❌ Error: {error}</div>
+  if(error && !demoMode) return <div className="app-error">❌ Error: {error}</div>
   if(!data) return <div className="app-empty">No data returned from API.</div>
 
   const arr = Array.isArray(data) ? data : [data]
@@ -30,6 +30,13 @@ export default function Dashboard(){
 
   return (
     <div className="app-root">
+      {/* Demo Mode Banner */}
+      {demoMode && (
+        <div className="demo-banner">
+          <strong>ℹ️ Demo Mode:</strong> The API is currently unavailable. Showing sample vulnerability data for demonstration purposes.
+        </div>
+      )}
+      
       {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen? ' open':''}`} aria-hidden={!sidebarOpen}>
         <div className="sidebar-brand">
