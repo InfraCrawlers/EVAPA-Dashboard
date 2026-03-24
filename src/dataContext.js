@@ -2,36 +2,33 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import axios from 'axios'
 import { generateMockDataForDemo } from './mockData'
 
-// Local persistence helper: store recent reports in localStorage under `vd:reports`.
-const LS_KEY = 'vd:reports'
+// Historical report persistence: store recent reports in localStorage for 30-day retention
+const LS_HISTORY_KEY = 'vd:reports'
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
-const CACHE_KEY = 'vd:lastPayload'
-const CACHE_TS = 'vd:lastFetch'
-const ONE_DAY = 24 * 60 * 60 * 1000
 
-function readLocalReports(){
+function readHistoricalReports(){
   try{
-    const raw = localStorage.getItem(LS_KEY)
+    const raw = localStorage.getItem(LS_HISTORY_KEY)
     if(!raw) return []
     return JSON.parse(raw)
   }catch(e){ return [] }
 }
 
-function writeLocalReports(list){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(list)) }catch(e){}
+function writeHistoricalReports(list){
+  try{ localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(list)) }catch(e){}
 }
 
-function persistToLocal(payload){
+function persistToHistory(payload){
   try{
     const now = Date.now()
     const id = `${now}-${Math.random().toString(36).slice(2,9)}`
     const item = { id, created_at: now, payload }
-    const list = readLocalReports()
+    const list = readHistoricalReports()
     list.unshift(item)
     // prune older than retention
     const cutoff = Date.now() - RETENTION_MS
     const pruned = list.filter(r => (r.created_at || 0) >= cutoff)
-    writeLocalReports(pruned.slice(0, 500)) // cap at 500 entries locally
+    writeHistoricalReports(pruned.slice(0, 500)) // cap at 500 entries
     return item
   }catch(e){ return null }
 }
@@ -48,32 +45,18 @@ export function DataProvider({ children }){
     let cancelled = false
     async function fetchData(){
       try{
-        // Check cached payload and timestamp — if within 1 day, use cache
-        const last = parseInt(localStorage.getItem(CACHE_TS) || '0', 10)
-        const now = Date.now()
-        if(last && (now - last) < ONE_DAY){
-          const cachedRaw = localStorage.getItem(CACHE_KEY)
-          if(cachedRaw){
-            const cached = JSON.parse(cachedRaw)
-            if(!cancelled){ setData(cached); setDemoMode(false); setLoading(false); }
-            return
-          }
-        }
-
-        // Fetch from backend API (with Redis caching)
-        // The backend will cache results and only hit AWS when cache expires
+        // Fetch from backend API with Redis caching
+        // Backend handles all caching — we just call it directly
         const res = await axios.get('http://localhost:5000/api/findings', { timeout: 15000 })
         if(cancelled) return
-        // API returns an envelope with `body` as a JSON string in sample
+        
         let payload = res.data
         if(payload && typeof payload.body === 'string'){
           try{ payload = JSON.parse(payload.body) }catch(e){ /* keep original */ }
         }
 
-        // Normalize the API shape: if payload is an array of report objects with `vulnerabilities`,
-        // transform to the internal format: array with a report_summary item and finding items.
-        // Example incoming item shape handled:
-        // { sk, processed_timestamp, total_high_severity_count, vulnerabilities: [ { host, threat_level, vulnerability_name, cvss_severity, port, nvt_oid } ], pk }
+        // Normalize the API response into internal format
+        // Converts various API shapes into: report_summary items + finding items
         if(Array.isArray(payload)){
           try{
             const transformed = []
@@ -106,27 +89,24 @@ export function DataProvider({ children }){
             payload = transformed
           }catch(e){ /* fall back to original payload */ }
         }
+        
         if(!cancelled) {
           setData(payload)
           setDemoMode(false)
           setError(null)
-          // cache for 1 day
-          try{ localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); localStorage.setItem(CACHE_TS, String(Date.now())) }catch(e){}
         }
-        // Persist locally (30 days retention) — primary persistence method
-        try{ persistToLocal(payload) }catch(e){}
-        // Post to backend for server-side logging (best-effort, non-blocking)
-        ;(async function postReport() {
-          try { await axios.post('http://localhost:5000/api/reports', payload, { timeout: 3000 }) } catch (e) { /* ignore */ }
-        })()
+        
+        // Persist to history (30 days) — for Historical view
+        try{ persistToHistory(payload) }catch(e){}
+        
       }catch(err){ 
-        // On API error, use fallback mock data
+        // Graceful degradation: On backend error, use demo data
         if(!cancelled) {
-          console.warn('API fetch failed, using demo data:', err.message)
+          console.warn('Failed to fetch from backend, using demo data:', err.message)
           const mockPayload = generateMockDataForDemo()
           setData(mockPayload)
           setDemoMode(true)
-          setError(null) // Don't show error since we have fallback data
+          setError(null) // Don't show error, user sees demo mode instead
         }
       }finally{ 
         if(!cancelled) setLoading(false) 
@@ -203,13 +183,7 @@ export function createPatchingHook(){
             `🔔 Check back in a few minutes to see updated findings.`
         )
 
-        // Clear local cache to force refresh
-        try {
-          localStorage.removeItem('vd:lastFetch')
-          localStorage.removeItem('vd:lastPayload')
-        } catch (e) { /* ignore */ }
-        
-        // Clear server-side Redis cache
+        // Clear server-side Redis cache to ensure fresh data
         try {
           await axios.post('http://localhost:5000/cache/clear', {}, { timeout: 5000 })
         } catch (e) { /* ignore */ }
