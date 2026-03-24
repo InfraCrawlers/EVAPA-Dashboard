@@ -5,6 +5,7 @@ import Vulnerabilities from './Vulnerabilities'
 import AssetsInventory from './AssetsInventory'
 import History from './History'
 import Patching from './Patching'
+import OpenVASConfig from './OpenVASConfig'
 
 export default function Dashboard(){
   const { data, loading, error, demoMode } = useData()
@@ -65,6 +66,10 @@ export default function Dashboard(){
             <span className="sidebar-emoji" aria-hidden="true">🔧</span>
             <i className="fas fa-tools sidebar-icon" aria-hidden="true"></i> Patching
           </button>
+          <button className={`sidebar-btn${activeTab==='openvas'?' active':''}`} onClick={()=> setActiveTab('openvas')}>
+            <span className="sidebar-emoji" aria-hidden="true">🔍</span>
+            <i className="fas fa-scan sidebar-icon" aria-hidden="true"></i> OpenVAS
+          </button>
         </nav>
       </aside>
 
@@ -103,6 +108,8 @@ export default function Dashboard(){
             <History />
           ) : activeTab === 'patching' ? (
             <Patching />
+          ) : activeTab === 'openvas' ? (
+            <OpenVASConfig />
           ) : null}
         </main>
         <footer className="footer">© 2026 Group 4 Capstone — Security Assessment Dashboard</footer>
