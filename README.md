@@ -85,7 +85,7 @@ npm run server
 Expected output:
 ```
 ✅ Connected to Redis
-🚀 Dashboard API Server running on http://localhost:5000
+🚀 Dashboard API Server running on http://localhost:3005
 ```
 
 **Terminal 4: Start Frontend**
@@ -93,7 +93,7 @@ Expected output:
 npm start
 ```
 
-Opens `http://localhost:3000` automatically.
+Opens `http://localhost:5001` automatically (or next available port).
 
 ### Or Run Both Concurrently
 
@@ -105,18 +105,18 @@ npm run start:dev
 
 ```bash
 # Check backend
-curl http://localhost:5000/health
+curl http://localhost:3005/health
 # Response: { "status": "ok", "redis": "connected", ... }
 
 # Check cache
-curl http://localhost:5000/cache/stats
+curl http://localhost:3005/cache/stats
 ```
 
 ### Production Deployment
 
 ```bash
 npm run build          # Build React frontend
-npm run start:prod     # Start Express server with built frontend (requires Redis)
+PORT=3005 npm run start:prod     # Start Express server with built frontend (requires Redis)
 ```
 
 ---
@@ -272,9 +272,9 @@ AWS_API_ENDPOINT=https://k0lybp4tea.execute-api.us-east-1.amazonaws.com
 | Command | Purpose |
 |---------|---------|
 | `npm start` | Start React frontend (port 3000) |
-| `npm run server` | Start backend with hot-reload (port 5000) |
+| `npm run server` | Start backend with hot-reload (port 3005) |
 | `npm run start:dev` | Run backend + frontend concurrently |
-| `npm run start:prod` | Production server mode |
+| `npm run start:prod` | Production server mode (port 3005) |
 | `npm run build` | Build React production bundle |
 | `npm test` | Run tests |
 
@@ -350,7 +350,7 @@ npm start                 # Start frontend
 ### 1. Verify Backend Health
 
 ```bash
-curl http://localhost:5000/health
+curl http://localhost:3005/health
 ```
 
 **Expected Response:**
@@ -366,24 +366,24 @@ curl http://localhost:5000/health
 
 ```bash
 # First request (cache miss)
-time curl http://localhost:5000/api/findings
+time curl http://localhost:3005/api/findings
 # Response time: 500-2000ms, "source": "aws"
 
 # Second request (cache hit)
-time curl http://localhost:5000/api/findings  
+time curl http://localhost:3005/api/findings  
 # Response time: 1-10ms, "source": "cache"
 ```
 
 ### 3. Monitor Cache Statistics
 
 ```bash
-curl http://localhost:5000/cache/stats
+curl http://localhost:3005/cache/stats
 ```
 
 ### 4. Test Patching
 
 ```bash
-curl -X POST http://localhost:5000/patching/apply \
+curl -X POST http://localhost:3005/patching/apply \
   -H "Content-Type: application/json" \
   -d '{"vms":"both"}'
 ```
@@ -625,10 +625,10 @@ node -c server.js
 
 ```bash
 # Check cache hit rate
-curl http://localhost:5000/cache/stats
+curl http://localhost:3005/cache/stats
 
 # Clear old cache
-curl -X POST http://localhost:5000/cache/clear
+curl -X POST http://localhost:3005/cache/clear
 ```
 
 ### Demo Mode Symptoms
@@ -763,8 +763,8 @@ To contribute:
 
 | Resource | Link |
 |----------|------|
-| **Live Demo** | http://localhost:3000 (after npm start) |
-| **API Docs** | http://localhost:5000/health |
+| **Live Demo** | http://localhost:5001 (after npm start) |
+| **API Docs** | http://localhost:3005/health |
 | **Redis Guide** | [docs/REDIS_CACHING.md](docs/REDIS_CACHING.md) |
 | **Setup Instructions** | [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) |
 | **GitHub** | https://github.com/InfraCrawlers/EVAPA-Dashboard |

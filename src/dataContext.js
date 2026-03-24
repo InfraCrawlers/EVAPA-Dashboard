@@ -5,7 +5,7 @@ import { generateMockDataForDemo } from './mockData'
 const DataContext = createContext(null)
 
 // API Base URL - Redis-backed backend is REQUIRED
-const API_BASE_URL = 'http://localhost:5000'
+const API_BASE_URL = 'http://localhost:3005'
 
 export function DataProvider({ children }){
   const [data, setData] = useState(null)
