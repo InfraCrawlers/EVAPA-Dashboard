@@ -125,12 +125,22 @@ export default function OpenVASConfig() {
 
     try {
       setLoading(true)
-      await openvasService.startScan(taskName)
-      setSuccessMsg(`🔍 Scan "${taskName}" started successfully!`)
-      await loadAllData()
-      setTimeout(() => setSuccessMsg(null), 3000)
+      setError(null) // Clear previous errors
+      const response = await openvasService.startScan(taskName)
+      
+      if (response.scan_started) {
+        setSuccessMsg(`🔍 Scan "${taskName}" started successfully!`)
+        await new Promise(resolve => setTimeout(resolve, 2000)) // Wait for response
+        await loadAllData()
+        setTimeout(() => setSuccessMsg(null), 3000)
+      } else {
+        setError('Scan request was sent but may not have started properly. Check task status.')
+      }
     } catch (err) {
-      setError(`Failed to start scan: ${err.message}`)
+      const errorMsg = err.response?.data?.message || err.message
+      const details = err.response?.data?.details ? ` (${JSON.stringify(err.response.data.details)})` : ''
+      console.error('Scan start error:', err)
+      setError(`❌ Failed to start scan: ${errorMsg}${details}. Make sure the task exists and is in a valid state.`)
     } finally {
       setLoading(false)
     }

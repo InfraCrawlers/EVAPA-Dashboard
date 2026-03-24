@@ -555,14 +555,35 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
 
 /**
  * POST /openvas/tasks/:taskName/start - Start a scan for a task
+ * Now handles looking up task ID by name
  */
 app.post('/openvas/tasks/:taskName/start', async (req, res) => {
   try {
     const { taskName } = req.params;
     const decodedName = decodeURIComponent(taskName);
     
+    // First, fetch all tasks to find the ID matching this name
+    console.log(`🔍 Looking up task ID for: ${decodedName}`);
+    const tasksResponse = await axios.get(`${OPENVAS_API}/tasks`, { timeout: 10000 });
+    
+    // Find task with matching name
+    const targetTask = tasksResponse.data.tasks?.find(t => t.name === decodedName);
+    
+    if (!targetTask) {
+      return res.status(404).json({ 
+        error: 'Task not found',
+        message: `No task found with name: ${decodedName}`,
+        taskName: decodedName,
+        availableTasks: tasksResponse.data.tasks?.map(t => ({ id: t.id, name: t.name })) || []
+      });
+    }
+
+    const taskId = targetTask.id;
+    console.log(`✅ Found task ID: ${taskId} for name: ${decodedName}`);
+    
+    // Now start the scan using the task ID
     const response = await axios.post(
-      `${OPENVAS_API}/tasks/${encodeURIComponent(decodedName)}/start`,
+      `${OPENVAS_API}/tasks/${taskId}/start`,
       {},
       { timeout: 10000 }
     );
@@ -571,13 +592,20 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
     await cache.invalidate('openvas:tasks:*');
     await cache.invalidate(`openvas:task-progress:${decodedName}`);
     
-    console.log(`✅ OpenVAS Scan started for task: ${decodedName}`);
-    res.json({ ...response.data, scan_started: true });
+    console.log(`✅ OpenVAS Scan started successfully for task: ${decodedName} (${taskId})`);
+    res.json({ 
+      ...response.data, 
+      scan_started: true,
+      taskId: taskId,
+      taskName: decodedName
+    });
   } catch (error) {
-    console.error('❌ OpenVAS Scan start failed:', error.message);
-    res.status(500).json({ 
+    console.error('❌ OpenVAS Scan start failed:', error.response?.status, error.message);
+    res.status(error.response?.status || 500).json({ 
       error: 'Failed to start scan',
-      message: error.message
+      message: error.message,
+      status: error.response?.status,
+      details: error.response?.data
     });
   }
 });
