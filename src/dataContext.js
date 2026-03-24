@@ -60,8 +60,9 @@ export function DataProvider({ children }){
           }
         }
 
-        // Use a relative path so the dev server proxy (set in package.json) forwards the request
-        const res = await axios.get('/testing/getdata')
+        // Fetch from backend API (with Redis caching)
+        // The backend will cache results and only hit AWS when cache expires
+        const res = await axios.get('http://localhost:5000/api/findings', { timeout: 15000 })
         if(cancelled) return
         // API returns an envelope with `body` as a JSON string in sample
         let payload = res.data
@@ -114,9 +115,9 @@ export function DataProvider({ children }){
         }
         // Persist locally (30 days retention) — primary persistence method
         try{ persistToLocal(payload) }catch(e){}
-        // Also attempt server POST if available (best-effort, non-blocking)
+        // Post to backend for server-side logging (best-effort, non-blocking)
         ;(async function postReport() {
-          try { await axios.post('http://localhost:4000/api/reports', payload, { timeout: 3000 }) } catch (e) { /* ignore */ }
+          try { await axios.post('http://localhost:5000/api/reports', payload, { timeout: 3000 }) } catch (e) { /* ignore */ }
         })()
       }catch(err){ 
         // On API error, use fallback mock data
@@ -166,9 +167,9 @@ export function createPatchingHook(){
       setPatchStatus(`🔄 Starting patch deployment for ${vmSelection}...\n`)
 
       try {
-        // Step 1: Trigger patching API
+        // Step 1: Trigger patching API via backend
         setPatchStatus((prev) => prev + `📦 Calling patch API for ${vmSelection}...\n`)
-        const patchRes = await axios.post('/patching/apply', {
+        const patchRes = await axios.post('http://localhost:5000/patching/apply', {
           vms: vmSelection, // 'both', 'windows', or 'linux'
           timestamp: new Date().toISOString()
         }, { timeout: 30000 })
@@ -183,9 +184,9 @@ export function createPatchingHook(){
         setPatchStatus((prev) => prev + `⏳ Waiting for patches to apply (30 seconds)...\n`)
         await new Promise((resolve) => setTimeout(resolve, 30000))
 
-        // Step 3: Trigger OpenVAS scan
+        // Step 3: Trigger OpenVAS scan via backend
         setPatchStatus((prev) => prev + `🔍 Starting OpenVAS scan...\n`)
-        const scanRes = await axios.post('/scanning/openvas-trigger', {
+        const scanRes = await axios.post('http://localhost:5000/scanning/openvas-trigger', {
           target: vmSelection,
           timestamp: new Date().toISOString()
         }, { timeout: 10000 })
@@ -202,10 +203,15 @@ export function createPatchingHook(){
             `🔔 Check back in a few minutes to see updated findings.`
         )
 
-        // Clear cache to force refresh on next page load
+        // Clear local cache to force refresh
         try {
           localStorage.removeItem('vd:lastFetch')
           localStorage.removeItem('vd:lastPayload')
+        } catch (e) { /* ignore */ }
+        
+        // Clear server-side Redis cache
+        try {
+          await axios.post('http://localhost:5000/cache/clear', {}, { timeout: 5000 })
         } catch (e) { /* ignore */ }
       } catch (err) {
         const errorMsg = err.response?.data?.message || err.message || 'Unknown error'

@@ -29,7 +29,7 @@ export default function Dashboard(){
   const avgSeverity = findings.length ? (findings.reduce((s,x)=> s+(x.severity_num || 0), 0) / findings.length).toFixed(1) : 0
 
   return (
-    <div className="app-root">
+    <>
       {/* Demo Mode Banner */}
       {demoMode && (
         <div className="demo-banner">
@@ -37,8 +37,9 @@ export default function Dashboard(){
         </div>
       )}
       
-      {/* Sidebar */}
-      <aside className={`sidebar${sidebarOpen? ' open':''}`} aria-hidden={!sidebarOpen}>
+      <div className="app-root">
+        {/* Sidebar */}
+        <aside className={`sidebar${sidebarOpen? ' open':''}`} aria-hidden={!sidebarOpen}>
         <div className="sidebar-brand">
           <div className="brand-mark">VD</div>
           <div className="brand-title">Vulnerability Dashboard</div>
@@ -106,6 +107,7 @@ export default function Dashboard(){
         </main>
         <footer className="footer">© 2026 Group 4 Capstone — Security Assessment Dashboard</footer>
       </div>
-    </div>
+      </div>
+    </>
   )
 }
