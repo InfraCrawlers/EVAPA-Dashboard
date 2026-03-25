@@ -34,38 +34,45 @@ export default React.memo(function History(){
     <div className="page">
       <header className="page-header">
         <h2>History</h2>
-        <p className="muted">Scan reports from last 30 days (Redis backed)</p>
+        <p className="muted">Scan reports from DynamoDB</p>
       </header>
       <section>
         {loading && <p>Loading reports…</p>}
         {error && <p className="error">{error}</p>}
-        {!loading && !reports.length && <p>No reports found.</p>}
+        {!loading && !reports.length && !error && <p>No reports found.</p>}
         <ul className="report-list">
           {reports.map(r => (
             <li key={r.id} className="report-item">
               <div className="report-meta">
-                {/* Prefer scan date inside payload, fall back to stored created_at */}
                 <strong>{(function(){
                   try{
-                    const p = r.payload
-                    let maybe = null
-                    if(Array.isArray(p)){
-                      const summary = p.find(it => it && (it.item_type === 'report_summary' || it.type === 'report_summary'))
-                      if(summary && summary.scan_start) maybe = summary.scan_start
-                      // also check nested shapes
-                      if(!maybe && summary && summary.report && summary.report.scan_start) maybe = summary.report.scan_start
-                    } else if(p && typeof p === 'object'){
-                      maybe = p.report_summary?.scan_start || p.scan_date || p.summary?.scan_start || p.scan_start
-                    }
-                    if(!maybe) maybe = r.created_at
-                    const d = maybe ? new Date(maybe) : null
-                    return d ? d.toLocaleString() : 'Unknown'
-                  }catch(e){ return new Date(r.created_at).toLocaleString() }
+                    const ts = r.payload?.processed_timestamp || r.created_at
+                    return ts ? new Date(ts).toLocaleString() : 'Unknown'
+                  }catch(e){ return 'Unknown' }
                 })()}</strong>
-                <span className="muted"> — {r.id}</span>
+                <span className="muted"> — {r.payload?.pk || r.id}</span>
+                {r.payload?.total_high_severity_count > 0 && (
+                  <span style={{marginLeft:'10px',color:'#e74c3c',fontWeight:600}}>
+                    ⚠️ {r.payload.total_high_severity_count} High Severity
+                  </span>
+                )}
               </div>
+              {r.payload?.vulnerabilities && (
+                <div style={{margin:'8px 0',fontSize:'13px',color:'#aaa'}}>
+                  {r.payload.vulnerabilities.length} vulnerabilities found
+                  {r.payload.vulnerabilities.slice(0,3).map((v,i) => (
+                    <div key={i} style={{marginLeft:'12px',marginTop:'4px'}}>
+                      <span style={{color: v.threat_level === 'Critical' ? '#e74c3c' : v.threat_level === 'High' ? '#f39c12' : '#95a5a6'}}>●</span>
+                      {' '}{v.vulnerability_name} ({v.host}:{v.port})
+                    </div>
+                  ))}
+                  {r.payload.vulnerabilities.length > 3 && (
+                    <div style={{marginLeft:'12px',marginTop:'4px',color:'#666'}}>...and {r.payload.vulnerabilities.length - 3} more</div>
+                  )}
+                </div>
+              )}
               <details>
-                <summary>View payload</summary>
+                <summary>View full report</summary>
                 <pre className="small">{JSON.stringify(r.payload, null, 2)}</pre>
               </details>
             </li>

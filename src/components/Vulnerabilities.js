@@ -2,10 +2,24 @@ import React, { useState, useMemo, useEffect } from 'react'
 
 export default React.memo(function Vulnerabilities({ findings }){
   const [severity, setSeverity] = useState('all')
+  const [selectedReport, setSelectedReport] = useState('all')
   const [selected, setSelected] = useState(null)
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 10
+
+  // Build unique report options from findings
+  const reportOptions = useMemo(() => {
+    const map = new Map()
+    findings.forEach(f => {
+      if (f.report_id && !map.has(f.report_id)) {
+        const shortId = f.report_id.replace('openvas-reports/', '').replace('.xml', '')
+        const ts = f.report_timestamp ? new Date(f.report_timestamp).toLocaleString() : ''
+        map.set(f.report_id, { id: f.report_id, label: ts ? `${shortId.slice(0,8)}... (${ts})` : shortId })
+      }
+    })
+    return Array.from(map.values())
+  }, [findings])
 
   const severityLevels = [
     {key:'all', label:'All'},
@@ -26,14 +40,16 @@ export default React.memo(function Vulnerabilities({ findings }){
 
   const filtered = useMemo(()=>{
     const q = query.trim().toLowerCase()
-    const base = findings.filter(f=> matchesSeverity(f))
+    let base = findings
+    if (selectedReport !== 'all') base = base.filter(f => f.report_id === selectedReport)
+    base = base.filter(f=> matchesSeverity(f))
     if(!q) return base
     return base.filter(f=> (
       (f.name||'').toLowerCase().includes(q) ||
       (f.hostname||f.host||'').toLowerCase().includes(q) ||
       (f.cves||[]).join(' ').toLowerCase().includes(q)
     ))
-  },[findings,severity,query])
+  },[findings,severity,query,selectedReport])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const pageItems = filtered.slice((page-1)*pageSize, page*pageSize)
@@ -77,6 +93,21 @@ export default React.memo(function Vulnerabilities({ findings }){
         </div>
 
         <div style={{display:'flex',gap:8,alignItems:'center',marginLeft:'auto'}}>
+          {reportOptions.length > 1 && (
+            <select
+              value={selectedReport}
+              onChange={e => { setSelectedReport(e.target.value); setPage(1) }}
+              style={{padding:'6px 10px',borderRadius:'8px',border:'1px solid rgba(255,255,255,0.12)',background:'rgba(255,255,255,0.06)',color:'inherit',fontSize:'13px',cursor:'pointer',maxWidth:'240px'}}
+            >
+              <option value="all">All Reports ({reportOptions.length})</option>
+              {reportOptions.map(r => (
+                <option key={r.id} value={r.id}>{r.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <input className="search-input" placeholder="Search name, host, CVE..." value={query} onChange={e=>{ setQuery(e.target.value); setPage(1) }} />
           <div className="results-count">{filtered.length} results</div>
           <button className="sidebar-btn" onClick={exportCSV} title="Export CSV"><i className="fa-solid fa-file-csv"></i></button>

@@ -40,10 +40,10 @@ async function initializeRedis() {
   }
 }
 
-// Caching Service
+// Caching Service — uses a getter so it always reads the current redisClient
 class CacheService {
-  constructor(client) {
-    this.client = client;
+  get client() {
+    return redisClient;
   }
 
   async get(key) {
@@ -94,7 +94,7 @@ class CacheService {
   }
 }
 
-const cache = new CacheService(redisClient);
+const cache = new CacheService();
 
 // Fetch from AWS API with error handling
 async function fetchFromAWS(endpoint) {
@@ -148,7 +148,7 @@ app.get('/api/findings', async (req, res) => {
 
 /**
  * GET /api/reports
- * Returns vulnerability reports with caching
+ * Returns vulnerability reports from /findings endpoint in DynamoDB
  */
 app.get('/api/reports', async (req, res) => {
   const cacheKey = 'reports:all';
@@ -160,7 +160,18 @@ app.get('/api/reports', async (req, res) => {
       return res.json(data);
     }
 
-    data = await fetchFromAWS('/reports');
+    // Reports are stored in /findings on DynamoDB
+    const raw = await fetchFromAWS('/findings');
+    const findings = Array.isArray(raw) ? raw : [];
+    
+    // Transform each finding into a report shape for the History page
+    data = {
+      data: findings.map(report => ({
+        id: report.pk || `report-${Date.now()}`,
+        created_at: report.processed_timestamp || new Date().toISOString(),
+        payload: report
+      }))
+    };
     
     const ttl = parseInt(process.env.CACHE_TTL_REPORTS) || 3600;
     await cache.set(cacheKey, data, ttl);
@@ -772,6 +783,103 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
  */
 
 /**
+ * GET /api/dashboard-summary
+ * Aggregates data from all sources for the Overview monitoring page
+ */
+app.get('/api/dashboard-summary', async (req, res) => {
+  const cacheKey = 'dashboard:summary';
+  try {
+    let data = await cache.get(cacheKey);
+    if (data) return res.json(data);
+
+    // Fetch all data sources in parallel
+    const [findingsRes, tasksRes, targetsRes, ec2Res] = await Promise.allSettled([
+      axios.get(`${AWS_API}/findings`, { timeout: 10000 }),
+      openvasClient.get('/tasks'),
+      openvasClient.get('/targets'),
+      (async () => {
+        if (!process.env.AWS_ACCESS_KEY_ID) return { data: { instances: [] } };
+        const cmd = new DescribeInstancesCommand({ Filters: [{ Name: 'instance-state-name', Values: ['running', 'stopped'] }] });
+        const resp = await ec2Client.send(cmd);
+        const instances = [];
+        resp.Reservations.forEach(r => r.Instances.forEach(i => instances.push({
+          instanceId: i.InstanceId,
+          instanceName: i.Tags?.find(t => t.Key === 'Name')?.Value || i.InstanceId,
+          state: i.State.Name,
+          privateIpAddress: i.PrivateIpAddress,
+          publicIpAddress: i.PublicIpAddress || 'N/A',
+          instanceType: i.InstanceType
+        })));
+        return { data: { instances } };
+      })()
+    ]);
+
+    const findings = findingsRes.status === 'fulfilled' && Array.isArray(findingsRes.value.data) ? findingsRes.value.data : [];
+    const tasks = tasksRes.status === 'fulfilled' ? (tasksRes.value.data.tasks || []) : [];
+    const targets = targetsRes.status === 'fulfilled' ? (targetsRes.value.data.targets || []) : [];
+    const ec2Instances = ec2Res.status === 'fulfilled' ? (ec2Res.value.data.instances || []) : [];
+
+    // Get patch statuses
+    let patchStatuses = {};
+    if (redisClient) {
+      const keys = await redisClient.keys('patched:*');
+      for (const key of keys) {
+        const raw = await redisClient.get(key);
+        const taskName = key.replace('patched:', '');
+        patchStatuses[taskName] = raw ? JSON.parse(raw) : { patched: true };
+      }
+    }
+
+    // Aggregate vulnerability stats from all scan reports
+    const allVulns = findings.flatMap(r => r.vulnerabilities || []);
+    const criticalCount = allVulns.filter(v => v.cvss_severity >= 9).length;
+    const highCount = allVulns.filter(v => v.cvss_severity >= 7 && v.cvss_severity < 9).length;
+    const mediumCount = allVulns.filter(v => v.cvss_severity >= 4 && v.cvss_severity < 7).length;
+    const lowCount = allVulns.filter(v => v.cvss_severity < 4).length;
+    const uniqueHosts = [...new Set(allVulns.map(v => v.host).filter(Boolean))];
+    const avgCvss = allVulns.length ? (allVulns.reduce((s, v) => s + (v.cvss_severity || 0), 0) / allVulns.length).toFixed(1) : 0;
+
+    data = {
+      vulnerabilities: {
+        total: allVulns.length,
+        critical: criticalCount,
+        high: highCount,
+        medium: mediumCount,
+        low: lowCount,
+        avgCvss: parseFloat(avgCvss),
+        uniqueHosts: uniqueHosts,
+        hostCount: uniqueHosts.length,
+        details: allVulns
+      },
+      scanReports: findings.map(r => ({
+        pk: r.pk,
+        timestamp: r.processed_timestamp,
+        vulnCount: (r.vulnerabilities || []).length,
+        highSeverityCount: r.total_high_severity_count || 0
+      })),
+      tasks: tasks.map(t => ({
+        name: t.name,
+        status: t.status,
+        progress: t.progress || 0,
+        target_name: t.target_name || t.target,
+        config_name: t.config_name || t.config,
+        patched: !!patchStatuses[t.name],
+        patchedAt: patchStatuses[t.name]?.patchedAt || null
+      })),
+      targets: targets.map(t => ({ name: t.name, id: t.id || t.target_id })),
+      ec2Instances: ec2Instances,
+      patchStatuses,
+      timestamp: new Date().toISOString()
+    };
+
+    await cache.set(cacheKey, data, 120); // 2 min TTL
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to build dashboard summary', message: error.message });
+  }
+});
+
+/**
  * GET /api/* - Proxy all other requests to AWS
  */
 app.get('/api/*', async (req, res) => {
@@ -820,19 +928,62 @@ app.post('/api/*', async (req, res) => {
 });
 
 /**
+ * GET /openvas/patch-status/:taskName - Check if this task was already patched
+ */
+app.get('/openvas/patch-status/:taskName', async (req, res) => {
+  try {
+    const { taskName } = req.params;
+    const status = await cache.get(`patched:${taskName}`);
+    res.json({
+      taskName,
+      patched: !!status,
+      patchedAt: status?.patchedAt || null,
+      vulnerabilityCount: status?.vulnerabilityCount || 0
+    });
+  } catch (error) {
+    res.json({ taskName: req.params.taskName, patched: false });
+  }
+});
+
+/**
+ * GET /openvas/all-patch-status - Get patch status for all known tasks
+ */
+app.get('/openvas/all-patch-status', async (req, res) => {
+  try {
+    if (!redisClient) return res.json({ statuses: {} });
+    const keys = await redisClient.keys('patched:*');
+    const statuses = {};
+    for (const key of keys) {
+      const taskName = key.replace('patched:', '');
+      const val = await cache.get(key.replace('patched:', '').length ? key : null);
+      const raw = await redisClient.get(key);
+      statuses[taskName] = raw ? JSON.parse(raw) : { patched: true };
+    }
+    res.json({ statuses });
+  } catch (error) {
+    res.json({ statuses: {} });
+  }
+});
+
+/**
  * GET /openvas/scan-reports/:taskName - Check if scan report exists in DynamoDB
+ * Uses /findings endpoint where all reports are stored
  */
 app.get('/openvas/scan-reports/:taskName', async (req, res) => {
   try {
     const { taskName } = req.params;
     
     const response = await axios.get(
-      `${AWS_API}/scan-reports?taskName=${encodeURIComponent(taskName)}`,
+      `${AWS_API}/findings`,
       { timeout: 10000 }
     );
     
-    const reports = response.data?.reports || [];
-    const latestReport = reports.length > 0 ? reports[0] : null;
+    const findings = Array.isArray(response.data) ? response.data : [];
+    // Find the most recent report by processed_timestamp
+    const sorted = findings
+      .filter(r => r.vulnerabilities && r.vulnerabilities.length > 0)
+      .sort((a, b) => (b.processed_timestamp || '').localeCompare(a.processed_timestamp || ''));
+    const latestReport = sorted.length > 0 ? sorted[0] : null;
     
     if (latestReport) {
       res.json({
@@ -863,6 +1014,28 @@ app.get('/openvas/scan-reports/:taskName', async (req, res) => {
 app.post('/openvas/auto-patch', async (req, res) => {
   try {
     const { taskName, taskId, targetName, scanStatus } = req.body;
+    
+    // Guard: check if this task was already patched (persistent in Redis with long TTL)
+    const alreadyPatched = await cache.get(`patched:${taskName}`);
+    if (alreadyPatched) {
+      return res.json({
+        success: true,
+        alreadyPatched: true,
+        message: `Task "${taskName}" was already patched on ${alreadyPatched.patchedAt}`,
+        patchedAt: alreadyPatched.patchedAt,
+        taskName
+      });
+    }
+
+    // IMMEDIATELY record as patched so no duplicate calls can start the workflow again
+    const patchedAt = new Date().toISOString();
+    await cache.set(`patched:${taskName}`, {
+      patched: true,
+      patchedAt,
+      taskName,
+      targetName,
+      status: 'in-progress'
+    }, 60 * 60 * 24 * 30); // 30 days
     
     // Step 1: Get the scan report from OpenVAS with caching
     const cacheKeyReport = `openvas:report:${taskName}`;
@@ -901,7 +1074,7 @@ app.post('/openvas/auto-patch', async (req, res) => {
       };
       
       dynamoResponse = await axios.post(
-        `${AWS_API}/scan-reports`,
+        `${AWS_API}/findings`,
         reportPayload,
         { timeout: 10000 }
       ).catch(err => {
@@ -938,6 +1111,7 @@ app.post('/openvas/auto-patch', async (req, res) => {
     // Cache invalidation
     await cache.invalidate('openvas:tasks:*');
     await cache.invalidate(`openvas:task-progress:${taskName}`);
+    await cache.invalidate('dashboard:*');
     
     res.json({
       success: true,
@@ -953,7 +1127,19 @@ app.post('/openvas/auto-patch', async (req, res) => {
       vulnerabilityCount: reportData.vulnerabilities?.length || 0,
       patchingStatus: patchingResponse.data
     });
+    
+    // Update patch record with final details
+    await cache.set(`patched:${taskName}`, {
+      patched: true,
+      patchedAt,
+      taskName,
+      targetName,
+      vulnerabilityCount: reportData.vulnerabilities?.length || 0,
+      status: 'completed'
+    }, 60 * 60 * 24 * 30);
   } catch (error) {
+    // Even on error, keep the patch record so it doesn't re-trigger
+    // (the record was already written at the start)
     res.status(500).json({
       success: false,
       error: 'Auto-patching workflow failed',

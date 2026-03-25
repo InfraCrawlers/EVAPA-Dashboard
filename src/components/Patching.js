@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import openvasService from '../services/openvasService'
 import './OpenVASConfig.css'
 
@@ -13,26 +13,56 @@ export default React.memo(function Patching() {
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [taskFormData, setTaskFormData] = useState({ name: '', targetName: '', configName: 'Full and fast' })
   const [patchingInProgress, setPatchingInProgress] = useState({})
-  const [completedScans, setCompletedScans] = useState({})
   const [patchingPhases, setPatchingPhases] = useState({})
-  const [reportCheckInProgress, setReportCheckInProgress] = useState({})
+  const [alreadyPatched, setAlreadyPatched] = useState({})
+  const [patchStatusesLoaded, setPatchStatusesLoaded] = useState(false)
 
-  // Load data on mount and set up auto-monitoring
+  // Ref to prevent duplicate patch triggers within a single session
+  const patchTriggeredRef = useRef({})
+
+  // Step 1: Load patch statuses from Redis FIRST, then load tasks
   useEffect(() => {
-    loadAllData()
-    const interval = setInterval(loadAllData, 10000) // Check every 10 seconds for scan completion
-    return () => clearInterval(interval)
+    let cancelled = false
+    async function init() {
+      try {
+        const res = await fetch('http://localhost:3005/openvas/all-patch-status')
+        const data = await res.json()
+        if (!cancelled && data.statuses) {
+          const patched = {}
+          Object.entries(data.statuses).forEach(([taskName, status]) => {
+            if (status.patched) patched[taskName] = status
+          })
+          setAlreadyPatched(patched)
+        }
+      } catch (err) { /* ignore */ }
+      if (!cancelled) {
+        setPatchStatusesLoaded(true)
+        loadAllData()
+      }
+    }
+    init()
+    const interval = setInterval(loadAllData, 10000)
+    return () => { cancelled = true; clearInterval(interval) }
   }, [])
 
-  // Monitor scan completion and trigger patching
+  // Step 2: When tasks update AND patch statuses are loaded, auto-patch
+  // any "Done" task that is NOT already recorded as patched in Redis.
+  // Each task only triggers once per session (tracked by ref).
   useEffect(() => {
+    if (!patchStatusesLoaded || tasks.length === 0) return
     tasks.forEach((task) => {
-      if (task.status?.toLowerCase() === 'done' && !completedScans[task.name] && !patchingInProgress[task.name]) {
-        setCompletedScans(prev => ({ ...prev, [task.name]: true }))
-        handleAutoPatching(task.name, task)
+      const name = task.name
+      if (
+        task.status?.toLowerCase() === 'done' &&
+        !alreadyPatched[name] &&
+        !patchingInProgress[name] &&
+        !patchTriggeredRef.current[name]
+      ) {
+        patchTriggeredRef.current[name] = true
+        handleAutoPatching(name, task)
       }
     })
-  }, [tasks, completedScans, patchingInProgress])
+  }, [tasks, patchStatusesLoaded, alreadyPatched, patchingInProgress])
 
   // Load OpenVAS data
   const loadAllData = async () => {
@@ -103,57 +133,13 @@ export default React.memo(function Patching() {
   }
 
   // Auto-trigger patching when scan is done
+  // Calls the server endpoint which handles everything (report check, DynamoDB, Lambda).
+  // Server records patch status immediately so duplicates are impossible.
   const handleAutoPatching = async (taskName, task) => {
     setPatchingInProgress(prev => ({ ...prev, [taskName]: true }))
-    setReportCheckInProgress(prev => ({ ...prev, [taskName]: true }))
+    setPatchingPhases(prev => ({ ...prev, [taskName]: 'patching' }))
     
     try {
-      // Phase 1: Check if report is generated in DynamoDB
-      setPatchingPhases(prev => ({ ...prev, [taskName]: 'checking-report' }))
-      
-      let reportExists = false
-      let checkAttempts = 0
-      const maxAttempts = 30 // Check for up to 5 minutes (30 * 10 seconds)
-      
-      while (!reportExists && checkAttempts < maxAttempts) {
-        try {
-          const checkResponse = await fetch(`http://localhost:3005/openvas/scan-reports/${encodeURIComponent(taskName)}`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-          })
-          
-          const checkData = await checkResponse.json()
-          
-          if (checkData.exists) {
-            reportExists = true
-            setPatchingPhases(prev => ({ ...prev, [taskName]: 'report-found' }))
-            break
-          } else {
-            checkAttempts++
-            if (checkAttempts < maxAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 10000)) // Wait 10 seconds before next check
-            }
-          }
-        } catch (err) {
-          checkAttempts++
-          if (checkAttempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 10000))
-          }
-        }
-      }
-      
-      setReportCheckInProgress(prev => ({ ...prev, [taskName]: false }))
-      
-      // If report not found after all attempts, show error but continue with patching attempt
-      if (!reportExists) {
-        setSuccessMsg(`⚠️ Report generation taking longer, initiating patching anyway for "${taskName}"`)
-      } else {
-        setSuccessMsg(`✅ Report generated and found in DynamoDB! Initiating patching for "${taskName}"`)
-      }
-      
-      // Phase 2: Trigger auto-patching
-      setPatchingPhases(prev => ({ ...prev, [taskName]: 'patching' }))
-      
       const response = await fetch('http://localhost:3005/openvas/auto-patch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,10 +153,12 @@ export default React.memo(function Patching() {
 
       const data = await response.json()
       
-      if (response.ok) {
+      if (data.alreadyPatched) {
+        setPatchingPhases(prev => ({ ...prev, [taskName]: 'already-patched' }))
+        setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: data.patchedAt } }))
+      } else if (response.ok) {
         setPatchingPhases(prev => ({ ...prev, [taskName]: 'completed' }))
-        setSuccessMsg(`🚀 Report generated! Patching triggered via AWS Lambda for "${taskName}"`)
-        setTimeout(() => setSuccessMsg(null), 5000)
+        setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: new Date().toISOString() } }))
       } else {
         setPatchingPhases(prev => ({ ...prev, [taskName]: 'error' }))
         setError(`Failed to trigger patching: ${data.message}`)
@@ -360,8 +348,12 @@ export default React.memo(function Patching() {
                   </div>
                 )}
                 {task.status?.toLowerCase() === 'done' && (
-                  <div style={{ fontSize: '13px', color: '#6fcf97', fontWeight: 600 }}>
-                    ✅ Scan Complete - Auto-patching in progress
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: alreadyPatched[task.name] ? '#6fcf97' : patchingInProgress[task.name] ? '#ffd166' : '#5a9bd8' }}>
+                    {alreadyPatched[task.name]
+                      ? `✅ Patched on ${new Date(alreadyPatched[task.name].patchedAt).toLocaleString()}`
+                      : patchingInProgress[task.name]
+                        ? '⏳ Auto-patching in progress...'
+                        : '✅ Scan Complete'}
                   </div>
                 )}
               </div>
@@ -412,39 +404,30 @@ export default React.memo(function Patching() {
                       🧪 {task.name}
                     </div>
                     <div style={{ fontSize: '13px', lineHeight: '2', color: '#bbb' }}>
-                      {reportCheckInProgress[task.name] && (
-                        <>
-                          <div>✅ Phase 1: Scan Complete</div>
-                          <div style={{ padding: '8px 12px', backgroundColor: 'rgba(90, 155, 216, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                            ⏳ Phase 2: Checking for report in DynamoDB...
-                          </div>
-                        </>
-                      )}
-                      {patchingPhases[task.name] === 'report-found' && (
-                        <>
-                          <div>✅ Phase 1: Scan Complete</div>
-                          <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                            ✅ Phase 2: Report Generated (in DynamoDB)
-                          </div>
-                        </>
-                      )}
                       {patchingPhases[task.name] === 'patching' && (
-                        <>
-                          <div>✅ Phase 1: Scan Complete</div>
-                          <div>✅ Phase 2: Report Generated</div>
-                          <div style={{ padding: '8px 12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                            🚀 Phase 3: Triggering AWS Lambda for patching...
-                          </div>
-                        </>
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          🚀 Triggering AWS Lambda for patching...
+                        </div>
                       )}
                       {patchingPhases[task.name] === 'completed' && (
-                        <>
-                          <div>✅ Phase 1: Scan Complete</div>
-                          <div>✅ Phase 2: Report Generated (in DynamoDB)</div>
-                          <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                            ✅ Phase 3: Patching Applied
-                          </div>
-                        </>
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          ✅ Patching Applied
+                        </div>
+                      )}
+                      {patchingPhases[task.name] === 'error' && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(231, 76, 60, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          ❌ Patching failed
+                        </div>
+                      )}
+                      {(patchingPhases[task.name] === 'already-patched' || (!patchingPhases[task.name] && alreadyPatched[task.name])) && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          ✅ Patched on {new Date(alreadyPatched[task.name]?.patchedAt).toLocaleString()}
+                        </div>
+                      )}
+                      {!patchingPhases[task.name] && !alreadyPatched[task.name] && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(90, 155, 216, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          ✅ Scan Complete — Awaiting patch trigger
+                        </div>
                       )}
                     </div>
                   </div>

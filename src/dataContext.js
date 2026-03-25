@@ -46,6 +46,8 @@ export function DataProvider({ children }){
               vulns.forEach(v=>{
                 transformed.push({
                   item_type: 'finding',
+                  report_id: rep.pk || rep.id || null,
+                  report_timestamp: rep.processed_timestamp || rep.sk || rep.scan_start || null,
                   name: v.vulnerability_name || v.name || 'Unnamed',
                   host: v.host || v.hostname || v.asset || 'unknown',
                   port: v.port || undefined,
