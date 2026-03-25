@@ -6,7 +6,7 @@ export default function OpenVASConfig() {
   // State Management
   const [portLists, setPortLists] = useState([])
   const [targets, setTargets] = useState([])
-  const [tasks, setTasks] = useState([])
+  const [ec2Instances, setEc2Instances] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
@@ -14,11 +14,9 @@ export default function OpenVASConfig() {
   // Form States
   const [showPortForm, setShowPortForm] = useState(false)
   const [showTargetForm, setShowTargetForm] = useState(false)
-  const [showTaskForm, setShowTaskForm] = useState(false)
 
   const [portFormData, setPortFormData] = useState({ name: '', portRange: '' })
-  const [targetFormData, setTargetFormData] = useState({ name: '', hosts: '', portListName: '' })
-  const [taskFormData, setTaskFormData] = useState({ name: '', targetName: '', configName: 'Full and fast' })
+  const [targetFormData, setTargetFormData] = useState({ name: '', selectedInstanceId: '' })
 
   // Load data on mount
   useEffect(() => {
@@ -27,19 +25,19 @@ export default function OpenVASConfig() {
     return () => clearInterval(interval)
   }, [])
 
-  // Load all OpenVAS data
+  // Load all data including EC2 instances
   const loadAllData = async () => {
     setLoading(true)
     try {
-      const [portListsData, targetsData, tasksData] = await Promise.all([
+      const [portListsData, targetsData, ec2Data] = await Promise.all([
         openvasService.getAllPortLists().catch(() => ({ port_lists: [] })),
         openvasService.getAllTargets().catch(() => ({ targets: [] })),
-        openvasService.getAllTasks().catch(() => ({ tasks: [] }))
+        fetch('http://localhost:3005/aws/ec2-instances').then(r => r.json()).catch(() => ({ instances: [] }))
       ])
 
       setPortLists(portListsData.port_lists || [])
       setTargets(targetsData.targets || [])
-      setTasks(tasksData.tasks || [])
+      setEc2Instances(ec2Data.instances || [])
       setError(null)
     } catch (err) {
       setError(`Failed to load data: ${err.message}`)
@@ -72,20 +70,35 @@ export default function OpenVASConfig() {
     }
   }
 
-  // Create Target
+  // Create Target from EC2 Instance
   const handleCreateTarget = async (e) => {
     e.preventDefault()
-    if (!targetFormData.name || !targetFormData.hosts || !targetFormData.portListName) {
-      setError('All target fields are required')
+    if (!targetFormData.name || !targetFormData.selectedInstanceId) {
+      setError('Target name and EC2 instance are required')
+      return
+    }
+
+    const selectedInstance = ec2Instances.find(i => i.instanceId === targetFormData.selectedInstanceId)
+    if (!selectedInstance) {
+      setError('Selected instance not found')
+      return
+    }
+
+    // Check if port lists exist
+    if (portLists.length === 0) {
+      setError('⚠️ No port lists available! Create a port list first before creating targets.')
       return
     }
 
     try {
       setLoading(true)
-      const hostsList = targetFormData.hosts.split(',').map(h => h.trim())
-      await openvasService.createTarget(targetFormData.name, hostsList, targetFormData.portListName)
-      setSuccessMsg(`✅ Target "${targetFormData.name}" created successfully!`)
-      setTargetFormData({ name: '', hosts: '', portListName: '' })
+      const hostsList = [selectedInstance.privateIpAddress]
+      // Use the first available port list
+      const firstPortListName = portLists[0].name
+      // Pass alive_test parameter to match new API format
+      await openvasService.createTarget(targetFormData.name, hostsList, firstPortListName, 'Consider Alive')
+      setSuccessMsg(`✅ Target "${targetFormData.name}" created with instance ${selectedInstance.instanceName} (${selectedInstance.privateIpAddress})!`)
+      setTargetFormData({ name: '', selectedInstanceId: '' })
       setShowTargetForm(false)
       await loadAllData()
       setTimeout(() => setSuccessMsg(null), 3000)
@@ -96,65 +109,10 @@ export default function OpenVASConfig() {
     }
   }
 
-  // Create Scan Task
-  const handleCreateTask = async (e) => {
-    e.preventDefault()
-    if (!taskFormData.name || !taskFormData.targetName) {
-      setError('Task name and target are required')
-      return
-    }
-
-    try {
-      setLoading(true)
-      await openvasService.createTask(taskFormData.name, taskFormData.targetName, taskFormData.configName)
-      setSuccessMsg(`✅ Task "${taskFormData.name}" created successfully!`)
-      setTaskFormData({ name: '', targetName: '', configName: 'Full and fast' })
-      setShowTaskForm(false)
-      await loadAllData()
-      setTimeout(() => setSuccessMsg(null), 3000)
-    } catch (err) {
-      setError(`Failed to create task: ${err.message}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Start Scan
-  const handleStartScan = async (taskName) => {
-    if (!window.confirm(`Start scan for task "${taskName}"?`)) return
-
-    try {
-      setLoading(true)
-      setError(null) // Clear previous errors
-      const response = await openvasService.startScan(taskName)
-      
-      if (response.scan_started) {
-        setSuccessMsg(`🔍 Scan "${taskName}" started successfully!`)
-        await new Promise(resolve => setTimeout(resolve, 2000)) // Wait for response
-        await loadAllData()
-        setTimeout(() => setSuccessMsg(null), 3000)
-      } else {
-        setError('Scan request was sent but may not have started properly. Check task status.')
-      }
-    } catch (err) {
-      const errorMsg = err.response?.data?.message || err.message
-      const details = err.response?.data?.details ? ` (${JSON.stringify(err.response.data.details)})` : ''
-      console.error('Scan start error:', err)
-      setError(`❌ Failed to start scan: ${errorMsg}${details}. Make sure the task exists and is in a valid state.`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Get status color
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'done': return '#27ae60'
-      case 'running': return '#f39c12'
-      case 'requested': return '#3498db'
-      case 'stopped': return '#e74c3c'
-      default: return '#95a5a6'
-    }
+  // Handle instance selection to show details
+  const getSelectedInstanceDetails = () => {
+    if (!targetFormData.selectedInstanceId) return null
+    return ec2Instances.find(i => i.instanceId === targetFormData.selectedInstanceId)
   }
 
   // Render Port Lists Section
@@ -241,44 +199,77 @@ export default function OpenVASConfig() {
 
       {showTargetForm && (
         <form className="ovconfig-form" onSubmit={handleCreateTarget}>
-          <div className="form-header">Add a New Scan Target</div>
+          <div className="form-header">Create Target from AWS EC2 Instance</div>
+          
+          {portLists.length === 0 && (
+            <div style={{ padding: '12px', backgroundColor: 'rgba(255, 107, 107, 0.1)', borderRadius: '6px', marginBottom: '15px', border: '1px solid rgba(255, 107, 107, 0.3)' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#ff6b6b' }}>❌ No Port Lists Available</div>
+              <div style={{ fontSize: '12px', color: '#aaa', lineHeight: '1.6' }}>
+                <p style={{ margin: '0 0 8px 0' }}>You must create a port list before creating targets.</p>
+                <p style={{ margin: '0' }}>📋 Scroll up to the "Port Lists" section and create your first port list (e.g., "Common Ports: 80,443,22")</p>
+              </div>
+            </div>
+          )}
+          
+          {ec2Instances.length === 0 && (
+            <div style={{ padding: '12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginBottom: '15px', border: '1px solid rgba(243, 156, 18, 0.3)' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#f39c12' }}>⚠️ No EC2 Instances Available</div>
+              <div style={{ fontSize: '12px', color: '#aaa', lineHeight: '1.6' }}>
+                <p style={{ margin: '0 0 8px 0' }}>AWS credentials are not configured on the backend.</p>
+                <p style={{ margin: '0' }}>To enable EC2 instance listing, add your AWS IAM credentials to the .env file:</p>
+                <code style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '6px 8px', borderRadius: '4px', display: 'block', marginTop: '6px', fontSize: '11px' }}>
+                  AWS_ACCESS_KEY_ID=your_access_key<br/>
+                  AWS_SECRET_ACCESS_KEY=your_secret_key
+                </code>
+              </div>
+            </div>
+          )}
+          
           <div className="form-group">
             <label>Target Name</label>
             <input
               type="text"
-              placeholder="e.g., Production Web Servers, Development Environment"
+              placeholder="e.g., Production Web Server, Database Instance"
               value={targetFormData.name}
               onChange={(e) => setTargetFormData({ ...targetFormData, name: e.target.value })}
             />
-            <small className="form-help">Give this target group a descriptive name</small>
+            <small className="form-help">Give this target a descriptive name</small>
           </div>
-          <div className="form-group">
-            <label>Hosts to Scan</label>
-            <input
-              type="text"
-              placeholder="e.g., 192.168.1.100, 10.0.0.50, server.domain.com"
-              value={targetFormData.hosts}
-              onChange={(e) => setTargetFormData({ ...targetFormData, hosts: e.target.value })}
-            />
-            <small className="form-help">Enter IP addresses or hostnames, separated by commas</small>
-          </div>
-          <div className="form-group">
-            <label>Port List Profile</label>
-            <select
-              value={targetFormData.portListName}
-              onChange={(e) => setTargetFormData({ ...targetFormData, portListName: e.target.value })}
-            >
-              <option value="">-- Select a Port List --</option>
-              {portLists.map((port) => (
-                <option key={port.id || port.port_list_id} value={port.name}>
-                  {port.name}
-                </option>
-              ))}
-            </select>
-            <small className="form-help">Choose which ports to scan on these targets</small>
-          </div>
-          <button type="submit" className="btn btn-success" disabled={loading}>
-            {loading ? '⏳ Creating...' : '✓ Create Target'}
+          
+          {ec2Instances.length > 0 && (
+            <div className="form-group">
+              <label>Select AWS EC2 Instance</label>
+              <select
+                value={targetFormData.selectedInstanceId}
+                onChange={(e) => setTargetFormData({ ...targetFormData, selectedInstanceId: e.target.value })}
+              >
+                <option value="">-- Select an Instance --</option>
+                {ec2Instances.map((instance) => (
+                  <option key={instance.instanceId} value={instance.instanceId}>
+                    {instance.instanceName} ({instance.privateIpAddress}) - {instance.state}
+                  </option>
+                ))}
+              </select>
+              <small className="form-help">Choose an EC2 instance to scan</small>
+            </div>
+          )}
+          
+          {getSelectedInstanceDetails() && (
+            <div style={{ padding: '12px', backgroundColor: 'rgba(90, 155, 216, 0.1)', borderRadius: '6px', marginBottom: '15px', border: '1px solid rgba(90, 155, 216, 0.3)' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#5a9bd8' }}>📋 Instance Details</div>
+              <div style={{ fontSize: '12px', lineHeight: '1.8', color: '#aaa' }}>
+                <div><strong>Instance ID:</strong> {getSelectedInstanceDetails().instanceId}</div>
+                <div><strong>Name:</strong> {getSelectedInstanceDetails().instanceName}</div>
+                <div><strong>Private IP:</strong> <code style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 4px', borderRadius: '3px' }}>{getSelectedInstanceDetails().privateIpAddress}</code></div>
+                <div><strong>Public IP:</strong> {getSelectedInstanceDetails().publicIpAddress}</div>
+                <div><strong>Instance Type:</strong> {getSelectedInstanceDetails().instanceType}</div>
+                <div><strong>State:</strong> <span style={{ color: getSelectedInstanceDetails().state === 'running' ? '#6fcf97' : '#f39c12' }}>{getSelectedInstanceDetails().state.toUpperCase()}</span></div>
+              </div>
+            </div>
+          )}
+
+          <button type="submit" className="btn btn-success" disabled={loading || portLists.length === 0 || ec2Instances.length === 0 || !targetFormData.selectedInstanceId}>
+            {portLists.length === 0 ? '❌ Create Port List First' : ec2Instances.length === 0 ? '❌ No Instances Available' : loading ? '⏳ Creating...' : '✓ Create Target'}
           </button>
         </form>
       )}
@@ -314,150 +305,6 @@ export default function OpenVASConfig() {
     </section>
   )
 
-  // Render Scan Tasks Section
-  const renderTasks = () => (
-    <section className="ovconfig-section">
-      <div className="ovconfig-header">
-        <div>
-          <h3>📋 Scan Tasks</h3>
-          <p className="section-description">Create and manage your vulnerability scanning jobs</p>
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowTaskForm(!showTaskForm)}>
-          {showTaskForm ? '✕ Cancel' : '＋ New Scan Task'}
-        </button>
-      </div>
-
-      {showTaskForm && (
-        <form className="ovconfig-form" onSubmit={handleCreateTask}>
-          <div className="form-header">Schedule a New Vulnerability Scan</div>
-          <div className="form-group">
-            <label>Scan Task Name</label>
-            <input
-              type="text"
-              placeholder="e.g., Weekly Production Assessment, Monthly Compliance Scan"
-              value={taskFormData.name}
-              onChange={(e) => setTaskFormData({ ...taskFormData, name: e.target.value })}
-            />
-            <small className="form-help">Create a descriptive name for this scan task</small>
-          </div>
-          <div className="form-group">
-            <label>Target to Scan</label>
-            <select
-              value={taskFormData.targetName}
-              onChange={(e) => setTaskFormData({ ...taskFormData, targetName: e.target.value })}
-            >
-              <option value="">-- Select a Target --</option>
-              {targets.map((target) => (
-                <option key={target.id || target.target_id} value={target.name}>
-                  {target.name}
-                </option>
-              ))}
-            </select>
-            <small className="form-help">Choose which target to scan</small>
-          </div>
-          <div className="form-group">
-            <label>Scan Profile</label>
-            <select
-              value={taskFormData.configName}
-              onChange={(e) => setTaskFormData({ ...taskFormData, configName: e.target.value })}
-            >
-              <option value="Full and fast">Full and fast - Thorough but quick</option>
-              <option value="Discovery">Discovery - Fast port discovery</option>
-              <option value="Full">Full - Comprehensive security audit</option>
-            </select>
-            <small className="form-help">Select scanning intensity</small>
-          </div>
-          <button type="submit" className="btn btn-success" disabled={loading}>
-            {loading ? '⏳ Creating...' : '✓ Create Scan Task'}
-          </button>
-        </form>
-      )}
-
-      <div className="ovconfig-tasks-list">
-        {tasks.length === 0 ? (
-          <div className="empty-state-full">
-            <div className="empty-icon">📋</div>
-            <div>No scan tasks created yet</div>
-            <small>Create your first scan task to start vulnerability assessments</small>
-          </div>
-        ) : (
-          tasks.map((task) => (
-            <div key={task.id || task.task_id} className="ovconfig-task-card">
-              <div className="task-header">
-                <div className="task-content">
-                  <div className="task-title-group">
-                    <div className="task-icon">🧪</div>
-                    <div className="task-name">{task.name}</div>
-                  </div>
-                  <div className="task-meta">
-                    <span className="task-config">💡 {task.config_name || task.config || 'Standard'}</span>
-                  </div>
-                </div>
-                <div className="task-status-badge" style={{
-                  backgroundColor: task.status?.toLowerCase() === 'done' ? 'rgba(111, 207, 151, 0.15)' : 
-                                   task.status?.toLowerCase() === 'running' ? 'rgba(255, 209, 102, 0.15)' :
-                                   'rgba(90, 155, 216, 0.15)',
-                  color: task.status?.toLowerCase() === 'done' ? '#6fcf97' : 
-                         task.status?.toLowerCase() === 'running' ? '#ffd166' : '#5a9bd8'
-                }}>
-                  {task.status?.toUpperCase() || 'UNKNOWN'}
-                </div>
-              </div>
-
-              <div className="task-info">
-                <div className="info-item">
-                  <span className="info-icon">🎯</span>
-                  <div className="info-text">
-                    <small className="info-label">Target</small>
-                    <div className="info-value">{task.target_name || task.target || 'Unknown'}</div>
-                  </div>
-                </div>
-                <div className="info-item">
-                  <span className="info-icon">⏱️</span>
-                  <div className="info-text">
-                    <small className="info-label">Progress</small>
-                    <div className="info-value">{task.progress || 0}% Complete</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="task-progress-container">
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${task.progress || 0}%`, backgroundColor: getStatusColor(task.status) }}
-                  ></div>
-                </div>
-              </div>
-
-              <div className="task-actions">
-                {task.status?.toLowerCase() !== 'done' && task.status?.toLowerCase() !== 'running' && (
-                  <button
-                    className="btn btn-sm btn-success"
-                    onClick={() => handleStartScan(task.name)}
-                    disabled={loading}
-                  >
-                    ▶ Start Scan
-                  </button>
-                )}
-                {task.report_count > 0 && (
-                  <button className="btn btn-sm btn-info">
-                    📊 {task.report_count} Report{task.report_count > 1 ? 's' : ''}
-                  </button>
-                )}
-                {task.status?.toLowerCase() === 'done' && (
-                  <button className="btn btn-sm btn-success">
-                    ✓ Completed
-                  </button>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
-  )
-
   // Render Summary Stats Section
   const renderStats = () => (
     <div className="stats-container">
@@ -479,24 +326,6 @@ export default function OpenVASConfig() {
           <div className="stat-label">Targets</div>
         </div>
       </div>
-      <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'linear-gradient(135deg, #ffd166, #ff9500)' }}>
-          📋
-        </div>
-        <div className="stat-content">
-          <div className="stat-value">{tasks.length}</div>
-          <div className="stat-label">Scan Tasks</div>
-        </div>
-      </div>
-      <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'linear-gradient(135deg, #ff3860, #ff6b9d)' }}>
-          ⚠️
-        </div>
-        <div className="stat-content">
-          <div className="stat-value">{tasks.filter(t => t.status?.toLowerCase() === 'running').length}</div>
-          <div className="stat-label">Active Scans</div>
-        </div>
-      </div>
     </div>
   )
 
@@ -504,12 +333,9 @@ export default function OpenVASConfig() {
     <div className="page openvas-config-page">
       <header className="page-header">
         <div className="header-content">
-          <h2>🔍 OpenVAS Configuration</h2>
-          <p className="muted">Manage vulnerability scanning tasks, targets, and port lists</p>
+          <h2>🔧 OpenVAS Configuration</h2>
+          <p className="muted">Manage port lists and target assets for scanning</p>
         </div>
-        <button className="btn btn-sm" style={{ background: 'rgba(111, 207, 151, 0.15)', color: '#6fcf97', border: '1px solid rgba(111, 207, 151, 0.3)' }} onClick={loadAllData}>
-          🔄 Refresh
-        </button>
       </header>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -521,7 +347,6 @@ export default function OpenVASConfig() {
       <div className="ovconfig-container">
         {renderPortLists()}
         {renderTargets()}
-        {renderTasks()}
       </div>
 
       <footer className="ovconfig-footer">

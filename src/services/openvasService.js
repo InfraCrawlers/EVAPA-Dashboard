@@ -78,12 +78,13 @@ export const openvasService = {
     }
   },
 
-  async createTarget(name, hosts, portListName) {
+  async createTarget(name, hosts, portListName, aliveTest = 'Consider Alive') {
     try {
       const res = await backendClient.post('/openvas/targets', {
         name,
         hosts: Array.isArray(hosts) ? hosts : [hosts],
-        port_list_name: portListName
+        port_list_name: portListName,
+        alive_test: aliveTest
       });
       return res.data;
     } catch (err) {

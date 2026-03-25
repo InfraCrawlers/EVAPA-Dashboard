@@ -155,7 +155,6 @@ Add these to your backend configuration:
 PATCHING_TIMEOUT=60000        # 60 seconds
 SCAN_WAIT_TIME=30000         # 30 seconds for patches to apply
 OPENVAS_API_URL=https://your-openvas-endpoint
-OPENVAS_API_KEY=your-api-key
 AWS_REGION=us-east-1
 ```
 

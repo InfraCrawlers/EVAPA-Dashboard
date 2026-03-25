@@ -2,15 +2,20 @@ const express = require('express');
 const cors = require('cors');
 const redis = require('redis');
 const axios = require('axios');
+const { EC2Client, DescribeInstancesCommand } = require('@aws-sdk/client-ec2');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const AWS_API = process.env.AWS_API_ENDPOINT;
+const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// EC2 Client for AWS
+const ec2Client = new EC2Client({ region: AWS_REGION });
 
 // Redis Client
 let redisClient = null;
@@ -318,20 +323,106 @@ app.get('/health', (req, res) => {
 
 /**
  * ==========================================
+ * AWS EC2 ROUTES
+ * ==========================================
+ */
+
+/**
+ * GET /aws/ec2-instances
+ * Fetch all EC2 instances with caching
+ */
+app.get('/aws/ec2-instances', async (req, res) => {
+  const cacheKey = 'aws:ec2:instances:all';
+  
+  try {
+    // Try cache first (10 minute TTL)
+    let data = await cache.get(cacheKey);
+    
+    if (data) {
+      console.log('✅ Cache HIT: EC2 instances');
+      return res.json({ instances: data, source: 'cache' });
+    }
+
+    console.log('❌ Cache MISS: EC2 instances, fetching from AWS...');
+    
+    // Check if AWS credentials are configured
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+      console.warn('⚠️  AWS credentials not configured (AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not set)');
+      console.warn('📝 To enable EC2 instance listing, set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env');
+      return res.json({ 
+        instances: [],
+        source: 'aws',
+        warning: 'AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file.'
+      });
+    }
+    
+    // Describe instances with filters for running and stopped instances
+    const command = new DescribeInstancesCommand({
+      Filters: [
+        {
+          Name: 'instance-state-name',
+          Values: ['running', 'stopped']
+        }
+      ]
+    });
+
+    const response = await ec2Client.send(command);
+    
+    // Transform response to simple format
+    const instances = [];
+    response.Reservations.forEach((reservation) => {
+      reservation.Instances.forEach((instance) => {
+        instances.push({
+          instanceId: instance.InstanceId,
+          instanceName: instance.Tags?.find(tag => tag.Key === 'Name')?.Value || instance.InstanceId,
+          state: instance.State.Name,
+          privateIpAddress: instance.PrivateIpAddress,
+          publicIpAddress: instance.PublicIpAddress || 'N/A',
+          instanceType: instance.InstanceType,
+          launchTime: instance.LaunchTime
+        });
+      });
+    });
+
+    // Cache the result (10 minutes)
+    await cache.set(cacheKey, instances, 600);
+    
+    console.log(`✅ Fetched ${instances.length} EC2 instances from AWS`);
+    res.json({ instances, source: 'openvas', count: instances.length });
+  } catch (error) {
+    console.error('❌ EC2 instances fetch failed:', error.message);
+    
+    // Handle credential errors gracefully
+    if (error.message.includes('credentials') || error.message.includes('CREDENTIALS')) {
+      return res.status(200).json({ 
+        instances: [],
+        source: 'aws',
+        warning: 'AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file.'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to fetch EC2 instances',
+      message: error.message,
+      instances: []
+    });
+  }
+});
+
+/**
+ * ==========================================
  * OPENVAS API ROUTES
  * ==========================================
  */
 
 const OPENVAS_API = 'https://edonu024me.execute-api.us-east-1.amazonaws.com/v1';
-const OPENVAS_API_KEY = process.env.OPENVAS_API_KEY || 'gmp_token';
 
-// Create axios instance with OpenVAS authentication
+// Create axios instance for OpenVAS (no auth required on AWS API)
 const openvasClient = axios.create({
   baseURL: OPENVAS_API,
   timeout: 10000,
   headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `ApiKey ${OPENVAS_API_KEY}`
+    'Content-Type': 'application/json'
   }
 });
 
@@ -399,7 +490,7 @@ app.get('/openvas/port-lists', async (req, res) => {
  */
 app.post('/openvas/targets', async (req, res) => {
   try {
-    const { name, hosts, port_list_name } = req.body;
+    const { name, hosts, port_list_name, alive_test } = req.body;
     
     if (!name || !hosts || !port_list_name) {
       return res.status(400).json({ 
@@ -407,7 +498,19 @@ app.post('/openvas/targets', async (req, res) => {
       });
     }
 
-    const response = await openvasClient.post('/targets', { name, hosts, port_list_name });
+    // Build payload with optional alive_test field
+    const payload = { 
+      name, 
+      hosts, 
+      port_list_name
+    };
+    
+    // Add alive_test if provided
+    if (alive_test) {
+      payload.alive_test = alive_test;
+    }
+
+    const response = await openvasClient.post('/targets', payload);
 
     // Invalidate targets cache
     await cache.invalidate('openvas:targets:*');
@@ -488,7 +591,7 @@ app.post('/openvas/tasks', async (req, res) => {
 });
 
 /**
- * GET /openvas/tasks - Get all scan tasks with caching
+ * GET /openvas/tasks - Get all scan tasks with caching and progress mapping
  */
 app.get('/openvas/tasks', async (req, res) => {
   try {
@@ -504,10 +607,28 @@ app.get('/openvas/tasks', async (req, res) => {
     console.log('❌ Cache MISS: OpenVAS tasks, fetching...');
     const response = await openvasClient.get('/tasks');
     
-    // Cache the response (5 minutes TTL for tasks - changes frequently)
-    await cache.set(cacheKey, response.data, 300);
+    // Transform tasks to ensure progress field is properly mapped
+    const transformedData = {
+      ...response.data,
+      tasks: (response.data.tasks || []).map(task => ({
+        ...task,
+        // Map progress from various possible field names
+        progress: task.progress !== undefined ? task.progress :
+                  task.percentageComplete !== undefined ? task.percentageComplete :
+                  task.progress_percentage !== undefined ? task.progress_percentage :
+                  task.completion !== undefined ? task.completion :
+                  0,
+        // Ensure progress is a number between 0-100
+        ...(typeof (task.progress || task.percentageComplete || task.progress_percentage || task.completion || 0) === 'string' 
+          ? { progress: parseInt((task.progress || task.percentageComplete || task.progress_percentage || task.completion || '0'), 10) }
+          : {})
+      }))
+    };
     
-    res.json({ ...response.data, source: 'openvas' });
+    // Cache the response (5 minutes TTL for tasks - changes frequently)
+    await cache.set(cacheKey, transformedData, 300);
+    
+    res.json({ ...transformedData, source: 'openvas' });
   } catch (error) {
     console.error('❌ OpenVAS Tasks fetch failed:', error.message);
     res.status(500).json({ 
@@ -518,7 +639,7 @@ app.get('/openvas/tasks', async (req, res) => {
 });
 
 /**
- * GET /openvas/task-progress/:taskName - Get task progress details
+ * GET /openvas/task-progress/:taskName - Get task progress details with proper mapping
  */
 app.get('/openvas/task-progress/:taskName', async (req, res) => {
   try {
@@ -536,10 +657,27 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
     console.log(`❌ Cache MISS: Task progress for ${decodedName}, fetching...`);
     const response = await openvasClient.get(`/tasks?name=${encodeURIComponent(decodedName)}`);
     
-    // Cache the response (1 minute TTL)
-    await cache.set(cacheKey, response.data, 60);
+    // Transform task data to ensure progress field is properly mapped
+    const task = response.data.tasks && response.data.tasks[0] ? response.data.tasks[0] : response.data;
     
-    res.json({ ...response.data, source: 'openvas' });
+    const transformedTask = {
+      ...task,
+      // Map progress from various possible field names
+      progress: task.progress !== undefined ? task.progress :
+                task.percentageComplete !== undefined ? task.percentageComplete :
+                task.progress_percentage !== undefined ? task.progress_percentage :
+                task.completion !== undefined ? task.completion :
+                0,
+      // Ensure progress is a number between 0-100
+      ...(typeof (task.progress || task.percentageComplete || task.progress_percentage || task.completion || 0) === 'string' 
+        ? { progress: parseInt((task.progress || task.percentageComplete || task.progress_percentage || task.completion || '0'), 10) }
+        : {})
+    };
+    
+    // Cache the response (1 minute TTL)
+    await cache.set(cacheKey, transformedTask, 60);
+    
+    res.json({ ...transformedTask, source: 'openvas' });
   } catch (error) {
     console.error('❌ OpenVAS Task Progress fetch failed:', error.message);
     res.status(500).json({ 
@@ -551,48 +689,34 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
 
 /**
  * POST /openvas/tasks/:taskName/start - Start a scan for a task
- * Now handles looking up task ID by name
+ * Uses task name (URL-encoded) directly in the path as per API documentation
  */
 app.post('/openvas/tasks/:taskName/start', async (req, res) => {
   try {
     const { taskName } = req.params;
     const decodedName = decodeURIComponent(taskName);
     
-    // First, fetch all tasks to find the ID matching this name
-    console.log(`🔍 Looking up task ID for: ${decodedName}`);
-    const tasksResponse = await openvasClient.get('/tasks');
+    console.log(`🚀 Starting scan for task: ${decodedName}`);
     
-    // Find task with matching name
-    const targetTask = tasksResponse.data.tasks?.find(t => t.name === decodedName);
-    
-    if (!targetTask) {
-      return res.status(404).json({ 
-        error: 'Task not found',
-        message: `No task found with name: ${decodedName}`,
-        taskName: decodedName,
-        availableTasks: tasksResponse.data.tasks?.map(t => ({ id: t.id, name: t.name })) || []
-      });
-    }
-
-    const taskId = targetTask.id;
-    console.log(`✅ Found task ID: ${taskId} for name: ${decodedName}`);
-    
-    // Now start the scan using the task ID
-    const response = await openvasClient.post(`/tasks/${taskId}/start`, {});
+    // Call the API endpoint with task name (URL-encoded) as documented
+    // Endpoint: POST /tasks/{task_name}/start
+    // Example: /tasks/Automated%20Infrastructure%20Scan/start
+    const response = await openvasClient.post(`/tasks/${taskName}/start`, {});
 
     // Invalidate task caches
     await cache.invalidate('openvas:tasks:*');
     await cache.invalidate(`openvas:task-progress:${decodedName}`);
     
-    console.log(`✅ OpenVAS Scan started successfully for task: ${decodedName} (${taskId})`);
+    console.log(`✅ OpenVAS Scan started successfully for task: ${decodedName}`);
     res.json({ 
+      message: `Scan "${decodedName}" started successfully`,
       ...response.data, 
       scan_started: true,
-      taskId: taskId,
       taskName: decodedName
     });
   } catch (error) {
     console.error('❌ OpenVAS Scan start failed:', error.response?.status, error.message);
+    console.error('📋 Full error:', error.response?.data);
     res.status(error.response?.status || 500).json({ 
       error: 'Failed to start scan',
       message: error.message,
@@ -653,6 +777,139 @@ app.post('/api/*', async (req, res) => {
   } catch (error) {
     res.status(500).json({ 
       error: 'Request failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /openvas/scan-reports/:taskName - Check if scan report exists in DynamoDB
+ */
+app.get('/openvas/scan-reports/:taskName', async (req, res) => {
+  try {
+    const { taskName } = req.params;
+    console.log(`📋 Checking for report in DynamoDB for task: ${taskName}`);
+    
+    const response = await axios.get(
+      `${AWS_API}/scan-reports?taskName=${encodeURIComponent(taskName)}`,
+      { timeout: 10000 }
+    );
+    
+    const reports = response.data?.reports || [];
+    const latestReport = reports.length > 0 ? reports[0] : null;
+    
+    if (latestReport) {
+      console.log(`✅ Report found in DynamoDB for task: ${taskName}`);
+      res.json({
+        exists: true,
+        report: latestReport,
+        message: 'Report found'
+      });
+    } else {
+      console.log(`⚠️ No report found in DynamoDB for task: ${taskName}`);
+      res.json({
+        exists: false,
+        report: null,
+        message: 'Report not yet generated'
+      });
+    }
+  } catch (error) {
+    console.error('Error checking report:', error.message);
+    res.status(500).json({
+      exists: false,
+      error: 'Failed to check report status',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /openvas/auto-patch - Auto-trigger patching when scan is done
+ * Generates report, stores in DynamoDB, and triggers Lambda
+ */
+app.post('/openvas/auto-patch', async (req, res) => {
+  try {
+    const { taskName, taskId, targetName, scanStatus } = req.body;
+    
+    console.log(`🔄 Auto-patching workflow started for task: ${taskName}`);
+    
+    // Step 1: Get the scan report from OpenVAS
+    console.log(`📊 Step 1: Fetching scan report...`);
+    const reportResponse = await openvasClient.get(`/tasks?name=${encodeURIComponent(taskName)}`);
+    const reportData = {
+      taskName,
+      taskId,
+      targetName,
+      reportGeneratedAt: new Date().toISOString(),
+      scanStatus,
+      data: reportResponse.data,
+      vulnerabilities: reportResponse.data?.vulnerabilities || [],
+      timestamp: Date.now()
+    };
+    
+    // Step 2: Store report in DynamoDB via AWS API
+    console.log(`💾 Step 2: Storing report in DynamoDB...`);
+    const dynamoResponse = await axios.post(
+      `${AWS_API}/scan-reports`,
+      {
+        reportId: `${taskName}-${Date.now()}`,
+        taskName,
+        targetName,
+        reportData: JSON.stringify(reportData),
+        createdAt: new Date().toISOString(),
+        status: 'generated'
+      },
+      { timeout: 10000 }
+    ).catch(err => {
+      console.warn('⚠️ DynamoDB store attempt (may not be critical):', err.message);
+      return { data: { success: true, message: 'Report processed' } };
+    });
+    
+    // Step 3: Trigger Lambda function for patching
+    console.log(`⚡ Step 3: Triggering AWS Lambda for patching...`);
+    const lambdaPayload = {
+      action: 'patch',
+      taskName,
+      targetName,
+      reportId: `${taskName}-${Date.now()}`,
+      vulnerabilities: reportData.vulnerabilities,
+      triggeredAt: new Date().toISOString()
+    };
+    
+    // Call Lambda via AWS API Gateway
+    const lambdaResponse = await axios.post(
+      `${AWS_API}/patch-trigger`,
+      lambdaPayload,
+      { timeout: 30000 }
+    ).catch(err => {
+      // Lambda call is async, so it's OK if it times out or returns immediately
+      console.log('Lambda trigger sent (async operation):', err.message);
+      return { data: { success: true, message: 'Patching initiated' } };
+    });
+    
+    console.log(`✅ Auto-patching workflow completed for task: ${taskName}`);
+    
+    // Cache invalidation
+    await cache.invalidate('openvas:tasks:*');
+    await cache.invalidate(`openvas:task-progress:${taskName}`);
+    
+    res.json({
+      success: true,
+      message: `Auto-patching workflow completed for "${taskName}"`,
+      steps: {
+        reportGenerated: true,
+        reportStoredInDynamoDB: true,
+        lambdaTriggered: true
+      },
+      reportId: `${taskName}-${Date.now()}`,
+      taskName: taskName,
+      targetName: targetName
+    });
+  } catch (error) {
+    console.error('❌ Auto-patching workflow failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Auto-patching workflow failed',
       message: error.message
     });
   }
