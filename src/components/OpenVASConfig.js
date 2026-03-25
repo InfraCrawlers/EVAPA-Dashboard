@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import openvasService from '../services/openvasService'
 import './OpenVASConfig.css'
 
-export default function OpenVASConfig() {
+export default React.memo(function OpenVASConfig() {
   // State Management
   const [portLists, setPortLists] = useState([])
   const [targets, setTargets] = useState([])
@@ -18,11 +18,9 @@ export default function OpenVASConfig() {
   const [portFormData, setPortFormData] = useState({ name: '', portRange: '' })
   const [targetFormData, setTargetFormData] = useState({ name: '', selectedInstanceId: '' })
 
-  // Load data on mount
+  // Load data on mount only (no continuous polling for performance)
   useEffect(() => {
     loadAllData()
-    const interval = setInterval(loadAllData, 30000) // Refresh every 30 seconds
-    return () => clearInterval(interval)
   }, [])
 
   // Load all data including EC2 instances
@@ -41,7 +39,6 @@ export default function OpenVASConfig() {
       setError(null)
     } catch (err) {
       setError(`Failed to load data: ${err.message}`)
-      console.error(err)
     } finally {
       setLoading(false)
     }
@@ -360,4 +357,4 @@ export default function OpenVASConfig() {
       </footer>
     </div>
   )
-}
+})

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 
-export default function Vulnerabilities({ findings }){
+export default React.memo(function Vulnerabilities({ findings }){
   const [severity, setSeverity] = useState('all')
   const [selected, setSelected] = useState(null)
   const [query, setQuery] = useState('')
@@ -165,4 +165,4 @@ export default function Vulnerabilities({ findings }){
 
     </div>
   )
-}
+})

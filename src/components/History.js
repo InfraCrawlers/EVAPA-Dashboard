@@ -3,7 +3,7 @@ import axios from 'axios'
 
 const API_BASE_URL = 'http://localhost:3005'
 
-export default function History(){
+export default React.memo(function History(){
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -19,7 +19,6 @@ export default function History(){
         setReports(res.data.data || [])
       }catch(err){
         if(mounted) {
-          console.warn('Failed to fetch reports from backend:', err.message)
           setError('Backend API unavailable. Make sure Redis and backend server are running.')
           setReports([])
         }
@@ -75,4 +74,4 @@ export default function History(){
       </section>
     </div>
   )
-}
+})

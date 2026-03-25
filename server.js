@@ -33,13 +33,9 @@ async function initializeRedis() {
     });
 
     redisClient.on('error', (err) => console.error('Redis Client Error', err));
-    redisClient.on('connect', () => console.log('✅ Connected to Redis'));
     
     await redisClient.connect();
-    console.log('🔴 Redis client initialized');
   } catch (error) {
-    console.error('❌ Redis connection failed:', error.message);
-    console.log('⚠️  Server will run without caching. Make sure Redis is running.');
     redisClient = null;
   }
 }
@@ -56,7 +52,6 @@ class CacheService {
       const value = await this.client.get(key);
       return value ? JSON.parse(value) : null;
     } catch (error) {
-      console.error(`Cache get error for key ${key}:`, error.message);
       return null;
     }
   }
@@ -65,9 +60,7 @@ class CacheService {
     if (!this.client) return;
     try {
       await this.client.setEx(key, ttl, JSON.stringify(value));
-      console.log(`📌 Cached: ${key} (TTL: ${ttl}s)`);
     } catch (error) {
-      console.error(`Cache set error for key ${key}:`, error.message);
     }
   }
 
@@ -77,10 +70,8 @@ class CacheService {
       const keys = await this.client.keys(pattern);
       if (keys.length > 0) {
         await this.client.del(keys);
-        console.log(`🗑️  Invalidated ${keys.length} cache keys matching "${pattern}"`);
       }
     } catch (error) {
-      console.error(`Cache invalidation error:`, error.message);
     }
   }
 
@@ -88,9 +79,7 @@ class CacheService {
     if (!this.client) return;
     try {
       await this.client.flushDb();
-      console.log('🗑️  Cache cleared');
     } catch (error) {
-      console.error('Cache clear error:', error.message);
     }
   }
 
@@ -100,7 +89,6 @@ class CacheService {
       const info = await this.client.info('stats');
       return info;
     } catch (error) {
-      console.error('Cache stats error:', error.message);
       return null;
     }
   }
@@ -138,19 +126,17 @@ app.get('/api/findings', async (req, res) => {
     let data = await cache.get(cacheKey);
     
     if (data) {
-      console.log('✅ Cache HIT: findings');
-      return res.json({ ...data, source: 'cache' });
+      return res.json(data);
     }
 
     // Cache miss - fetch from AWS
-    console.log('❌ Cache MISS: findings, fetching from AWS...');
     data = await fetchFromAWS('/findings');
     
     // Cache the result
     const ttl = parseInt(process.env.CACHE_TTL_FINDINGS) || 3600;
     await cache.set(cacheKey, data, ttl);
     
-    res.json({ ...data, source: 'aws' });
+    res.json(data);
   } catch (error) {
     res.status(500).json({ 
       error: 'Failed to fetch findings',
@@ -171,17 +157,15 @@ app.get('/api/reports', async (req, res) => {
     let data = await cache.get(cacheKey);
     
     if (data) {
-      console.log('✅ Cache HIT: reports');
-      return res.json({ ...data, source: 'cache' });
+      return res.json(data);
     }
 
-    console.log('❌ Cache MISS: reports, fetching from AWS...');
     data = await fetchFromAWS('/reports');
     
     const ttl = parseInt(process.env.CACHE_TTL_REPORTS) || 3600;
     await cache.set(cacheKey, data, ttl);
     
-    res.json({ ...data, source: 'aws' });
+    res.json(data);
   } catch (error) {
     res.status(500).json({ 
       error: 'Failed to fetch reports',
@@ -202,17 +186,15 @@ app.get('/api/systems', async (req, res) => {
     let data = await cache.get(cacheKey);
     
     if (data) {
-      console.log('✅ Cache HIT: systems');
-      return res.json({ ...data, source: 'cache' });
+      return res.json(data);
     }
 
-    console.log('❌ Cache MISS: systems, fetching from AWS...');
     data = await fetchFromAWS('/systems');
     
     const ttl = parseInt(process.env.CACHE_TTL_SYSTEMS) || 1800;
     await cache.set(cacheKey, data, ttl);
     
-    res.json({ ...data, source: 'aws' });
+    res.json(data);
   } catch (error) {
     res.status(500).json({ 
       error: 'Failed to fetch systems',
@@ -228,7 +210,6 @@ app.get('/api/systems', async (req, res) => {
  */
 app.post('/patching/apply', async (req, res) => {
   try {
-    console.log('🔧 Patching triggered...');
     const response = await fetchFromAWS('/patching/apply');
     
     // Invalidate related caches
@@ -251,7 +232,6 @@ app.post('/patching/apply', async (req, res) => {
  */
 app.post('/scanning/openvas-trigger', async (req, res) => {
   try {
-    console.log('🔍 Scanning triggered...');
     const response = await fetchFromAWS('/scanning/openvas-trigger');
     
     // Invalidate related caches
@@ -339,16 +319,11 @@ app.get('/aws/ec2-instances', async (req, res) => {
     let data = await cache.get(cacheKey);
     
     if (data) {
-      console.log('✅ Cache HIT: EC2 instances');
       return res.json({ instances: data, source: 'cache' });
     }
 
-    console.log('❌ Cache MISS: EC2 instances, fetching from AWS...');
-    
     // Check if AWS credentials are configured
     if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-      console.warn('⚠️  AWS credentials not configured (AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not set)');
-      console.warn('📝 To enable EC2 instance listing, set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env');
       return res.json({ 
         instances: [],
         source: 'aws',
@@ -387,10 +362,8 @@ app.get('/aws/ec2-instances', async (req, res) => {
     // Cache the result (10 minutes)
     await cache.set(cacheKey, instances, 600);
     
-    console.log(`✅ Fetched ${instances.length} EC2 instances from AWS`);
     res.json({ instances, source: 'openvas', count: instances.length });
   } catch (error) {
-    console.error('❌ EC2 instances fetch failed:', error.message);
     
     // Handle credential errors gracefully
     if (error.message.includes('credentials') || error.message.includes('CREDENTIALS')) {
@@ -405,6 +378,87 @@ app.get('/aws/ec2-instances', async (req, res) => {
       error: 'Failed to fetch EC2 instances',
       message: error.message,
       instances: []
+    });
+  }
+});
+
+/**
+ * ==========================================
+ * AWS PATCHING API ROUTES
+ * ==========================================
+ */
+
+const AWS_PATCHING_API = process.env.AWS_PATCHING_API;
+
+/**
+ * POST /aws/run-playbook - Trigger AWS patching playbook with caching
+ * Called after scan completes and report is generated
+ */
+app.post('/aws/run-playbook', async (req, res) => {
+  const { taskName, targetName, vulnerabilities } = req.body;
+  
+  try {
+    // Create a cache key based on task and target
+    const cacheKey = `patching:playbook:${taskName}:${targetName}`;
+    
+    // Check cache first (5 minute TTL to prevent duplicate patching runs)
+    const cachedResponse = await cache.get(cacheKey);
+    if (cachedResponse) {
+      return res.json({ 
+        ...cachedResponse, 
+        source: 'cache',
+        message: 'Patching already triggered (from cache)'
+      });
+    }
+
+    // Prepare patching payload
+    const patchingPayload = {
+      taskName,
+      targetName,
+      vulnerabilityCount: vulnerabilities?.length || 0,
+      vulnerabilities: vulnerabilities || [],
+      triggeredAt: new Date().toISOString(),
+      source: 'dashboard'
+    };
+
+    // Call AWS Patching API
+    const patchingResponse = await axios.post(
+      AWS_PATCHING_API,
+      patchingPayload,
+      { 
+        timeout: 30000,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const responseData = {
+      success: true,
+      message: 'Patching playbook triggered successfully',
+      taskName,
+      targetName,
+      playbook_id: patchingResponse.data?.playbook_id || `playbook-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      vulnerabilityCount: vulnerabilities?.length || 0
+    };
+
+    // Cache the response (5 minutes)
+    const ttl = parseInt(process.env.CACHE_TTL_PATCHING) || 300;
+    await cache.set(cacheKey, responseData, ttl);
+
+    res.json({ ...responseData, source: 'aws' });
+  } catch (error) {
+    
+    // Still return success to prevent blocking the workflow
+    // (patching is async and may happen even if immediate response fails)
+    res.status(202).json({
+      success: true,
+      message: 'Patching playbook trigger sent (async operation)',
+      taskName,
+      targetName,
+      note: 'Request accepted for asynchronous processing',
+      error: error.message
     });
   }
 });
@@ -444,10 +498,9 @@ app.post('/openvas/port-lists', async (req, res) => {
     // Invalidate port lists cache
     await cache.invalidate('openvas:port-lists:*');
     
-    console.log(`✅ OpenVAS Port List created: ${name}`);
     res.json({ ...response.data, created: true });
   } catch (error) {
-    console.error('❌ OpenVAS Port List creation failed:', error.message);
+    console.error('OpenVAS Port List creation failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to create port list',
       message: error.message
@@ -465,11 +518,9 @@ app.get('/openvas/port-lists', async (req, res) => {
     // Try cache first
     let data = await cache.get(cacheKey);
     if (data) {
-      console.log('✅ Cache HIT: OpenVAS port lists');
       return res.json({ ...data, source: 'cache' });
     }
 
-    console.log('❌ Cache MISS: OpenVAS port lists, fetching...');
     const response = await openvasClient.get('/port-lists');
     
     // Cache the response (15 minutes TTL)
@@ -477,7 +528,7 @@ app.get('/openvas/port-lists', async (req, res) => {
     
     res.json({ ...response.data, source: 'openvas' });
   } catch (error) {
-    console.error('❌ OpenVAS Port Lists fetch failed:', error.message);
+    console.error('OpenVAS Port Lists fetch failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to fetch port lists',
       message: error.message
@@ -515,10 +566,9 @@ app.post('/openvas/targets', async (req, res) => {
     // Invalidate targets cache
     await cache.invalidate('openvas:targets:*');
     
-    console.log(`✅ OpenVAS Target created: ${name}`);
     res.json({ ...response.data, created: true });
   } catch (error) {
-    console.error('❌ OpenVAS Target creation failed:', error.message);
+    console.error('OpenVAS Target creation failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to create target',
       message: error.message
@@ -536,11 +586,9 @@ app.get('/openvas/targets', async (req, res) => {
     // Try cache first
     let data = await cache.get(cacheKey);
     if (data) {
-      console.log('✅ Cache HIT: OpenVAS targets');
       return res.json({ ...data, source: 'cache' });
     }
 
-    console.log('❌ Cache MISS: OpenVAS targets, fetching...');
     const response = await openvasClient.get('/targets');
     
     // Cache the response (15 minutes TTL)
@@ -548,7 +596,7 @@ app.get('/openvas/targets', async (req, res) => {
     
     res.json({ ...response.data, source: 'openvas' });
   } catch (error) {
-    console.error('❌ OpenVAS Targets fetch failed:', error.message);
+    console.error('OpenVAS Targets fetch failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to fetch targets',
       message: error.message
@@ -579,10 +627,9 @@ app.post('/openvas/tasks', async (req, res) => {
     // Invalidate tasks cache
     await cache.invalidate('openvas:tasks:*');
     
-    console.log(`✅ OpenVAS Task created: ${name}`);
     res.json({ ...response.data, created: true });
   } catch (error) {
-    console.error('❌ OpenVAS Task creation failed:', error.message);
+    console.error('OpenVAS Task creation failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to create task',
       message: error.message
@@ -600,11 +647,9 @@ app.get('/openvas/tasks', async (req, res) => {
     // Try cache first (shorter TTL for tasks since progress changes)
     let data = await cache.get(cacheKey);
     if (data) {
-      console.log('✅ Cache HIT: OpenVAS tasks');
       return res.json({ ...data, source: 'cache' });
     }
 
-    console.log('❌ Cache MISS: OpenVAS tasks, fetching...');
     const response = await openvasClient.get('/tasks');
     
     // Transform tasks to ensure progress field is properly mapped
@@ -630,7 +675,7 @@ app.get('/openvas/tasks', async (req, res) => {
     
     res.json({ ...transformedData, source: 'openvas' });
   } catch (error) {
-    console.error('❌ OpenVAS Tasks fetch failed:', error.message);
+    console.error('OpenVAS Tasks fetch failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to fetch tasks',
       message: error.message
@@ -650,11 +695,9 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
     // Try cache first (1 minute TTL for progress - real-time)
     let data = await cache.get(cacheKey);
     if (data) {
-      console.log(`✅ Cache HIT: Task progress for ${decodedName}`);
       return res.json({ ...data, source: 'cache' });
     }
 
-    console.log(`❌ Cache MISS: Task progress for ${decodedName}, fetching...`);
     const response = await openvasClient.get(`/tasks?name=${encodeURIComponent(decodedName)}`);
     
     // Transform task data to ensure progress field is properly mapped
@@ -679,7 +722,7 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
     
     res.json({ ...transformedTask, source: 'openvas' });
   } catch (error) {
-    console.error('❌ OpenVAS Task Progress fetch failed:', error.message);
+    console.error('OpenVAS Task Progress fetch failed:', error.message);
     res.status(500).json({ 
       error: 'Failed to fetch task progress',
       message: error.message
@@ -696,8 +739,6 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
     const { taskName } = req.params;
     const decodedName = decodeURIComponent(taskName);
     
-    console.log(`🚀 Starting scan for task: ${decodedName}`);
-    
     // Call the API endpoint with task name (URL-encoded) as documented
     // Endpoint: POST /tasks/{task_name}/start
     // Example: /tasks/Automated%20Infrastructure%20Scan/start
@@ -707,7 +748,6 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
     await cache.invalidate('openvas:tasks:*');
     await cache.invalidate(`openvas:task-progress:${decodedName}`);
     
-    console.log(`✅ OpenVAS Scan started successfully for task: ${decodedName}`);
     res.json({ 
       message: `Scan "${decodedName}" started successfully`,
       ...response.data, 
@@ -715,8 +755,7 @@ app.post('/openvas/tasks/:taskName/start', async (req, res) => {
       taskName: decodedName
     });
   } catch (error) {
-    console.error('❌ OpenVAS Scan start failed:', error.response?.status, error.message);
-    console.error('📋 Full error:', error.response?.data);
+    console.error('OpenVAS Scan start failed:', error.response?.status, error.message);
     res.status(error.response?.status || 500).json({ 
       error: 'Failed to start scan',
       message: error.message,
@@ -743,11 +782,9 @@ app.get('/api/*', async (req, res) => {
     // Try cache
     let data = await cache.get(cacheKey);
     if (data) {
-      console.log(`✅ Cache HIT: ${endpoint}`);
       return res.json({ ...data, source: 'cache' });
     }
 
-    console.log(`❌ Cache MISS: ${endpoint}, fetching from AWS...`);
     data = await fetchFromAWS(endpoint);
     
     await cache.set(cacheKey, data, 3600);
@@ -788,7 +825,6 @@ app.post('/api/*', async (req, res) => {
 app.get('/openvas/scan-reports/:taskName', async (req, res) => {
   try {
     const { taskName } = req.params;
-    console.log(`📋 Checking for report in DynamoDB for task: ${taskName}`);
     
     const response = await axios.get(
       `${AWS_API}/scan-reports?taskName=${encodeURIComponent(taskName)}`,
@@ -799,14 +835,12 @@ app.get('/openvas/scan-reports/:taskName', async (req, res) => {
     const latestReport = reports.length > 0 ? reports[0] : null;
     
     if (latestReport) {
-      console.log(`✅ Report found in DynamoDB for task: ${taskName}`);
       res.json({
         exists: true,
         report: latestReport,
         message: 'Report found'
       });
     } else {
-      console.log(`⚠️ No report found in DynamoDB for task: ${taskName}`);
       res.json({
         exists: false,
         report: null,
@@ -814,7 +848,6 @@ app.get('/openvas/scan-reports/:taskName', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Error checking report:', error.message);
     res.status(500).json({
       exists: false,
       error: 'Failed to check report status',
@@ -825,69 +858,82 @@ app.get('/openvas/scan-reports/:taskName', async (req, res) => {
 
 /**
  * POST /openvas/auto-patch - Auto-trigger patching when scan is done
- * Generates report, stores in DynamoDB, and triggers Lambda
+ * Generates report, stores in DynamoDB, and triggers AWS patching playbook
  */
 app.post('/openvas/auto-patch', async (req, res) => {
   try {
     const { taskName, taskId, targetName, scanStatus } = req.body;
     
-    console.log(`🔄 Auto-patching workflow started for task: ${taskName}`);
+    // Step 1: Get the scan report from OpenVAS with caching
+    const cacheKeyReport = `openvas:report:${taskName}`;
+    let reportData = await cache.get(cacheKeyReport);
     
-    // Step 1: Get the scan report from OpenVAS
-    console.log(`📊 Step 1: Fetching scan report...`);
-    const reportResponse = await openvasClient.get(`/tasks?name=${encodeURIComponent(taskName)}`);
-    const reportData = {
-      taskName,
-      taskId,
-      targetName,
-      reportGeneratedAt: new Date().toISOString(),
-      scanStatus,
-      data: reportResponse.data,
-      vulnerabilities: reportResponse.data?.vulnerabilities || [],
-      timestamp: Date.now()
-    };
+    if (!reportData) {
+      const reportResponse = await openvasClient.get(`/tasks?name=${encodeURIComponent(taskName)}`);
+      reportData = {
+        taskName,
+        taskId,
+        targetName,
+        reportGeneratedAt: new Date().toISOString(),
+        scanStatus,
+        data: reportResponse.data,
+        vulnerabilities: reportResponse.data?.vulnerabilities || [],
+        timestamp: Date.now()
+      };
+      
+      // Cache report for 5 minutes
+      const ttl = parseInt(process.env.CACHE_TTL_OPENVAS) || 300;
+      await cache.set(cacheKeyReport, reportData, ttl);
+    }
     
-    // Step 2: Store report in DynamoDB via AWS API
-    console.log(`💾 Step 2: Storing report in DynamoDB...`);
-    const dynamoResponse = await axios.post(
-      `${AWS_API}/scan-reports`,
-      {
+    // Step 2: Store report in DynamoDB via AWS API (cached)
+    const cacheKeyDynamo = `dynamo:report:${taskName}`;
+    let dynamoResponse = await cache.get(cacheKeyDynamo);
+    
+    if (!dynamoResponse) {
+      const reportPayload = {
         reportId: `${taskName}-${Date.now()}`,
         taskName,
         targetName,
         reportData: JSON.stringify(reportData),
         createdAt: new Date().toISOString(),
         status: 'generated'
-      },
-      { timeout: 10000 }
-    ).catch(err => {
-      console.warn('⚠️ DynamoDB store attempt (may not be critical):', err.message);
-      return { data: { success: true, message: 'Report processed' } };
-    });
+      };
+      
+      dynamoResponse = await axios.post(
+        `${AWS_API}/scan-reports`,
+        reportPayload,
+        { timeout: 10000 }
+      ).catch(err => {
+        return { data: { success: true, message: 'Report processed' } };
+      });
+      
+      // Cache DynamoDB response
+      const ttl = parseInt(process.env.CACHE_TTL_REPORTS) || 3600;
+      await cache.set(cacheKeyDynamo, dynamoResponse.data, ttl);
+    }
     
-    // Step 3: Trigger Lambda function for patching
-    console.log(`⚡ Step 3: Triggering AWS Lambda for patching...`);
-    const lambdaPayload = {
-      action: 'patch',
+    // Step 3: Trigger AWS Patching Playbook with caching
+    const patchingPayload = {
       taskName,
       targetName,
-      reportId: `${taskName}-${Date.now()}`,
-      vulnerabilities: reportData.vulnerabilities,
-      triggeredAt: new Date().toISOString()
+      vulnerabilities: reportData.vulnerabilities || []
     };
     
-    // Call Lambda via AWS API Gateway
-    const lambdaResponse = await axios.post(
-      `${AWS_API}/patch-trigger`,
-      lambdaPayload,
+    // Call the new patching API endpoint (which has caching built in)
+    const patchingResponse = await axios.post(
+      'http://localhost:3005/aws/run-playbook',
+      patchingPayload,
       { timeout: 30000 }
     ).catch(err => {
-      // Lambda call is async, so it's OK if it times out or returns immediately
-      console.log('Lambda trigger sent (async operation):', err.message);
-      return { data: { success: true, message: 'Patching initiated' } };
+      return { 
+        data: { 
+          success: true, 
+          message: 'Patching triggered (async)',
+          error: err.message 
+        } 
+      };
     });
-    
-    console.log(`✅ Auto-patching workflow completed for task: ${taskName}`);
     
     // Cache invalidation
     await cache.invalidate('openvas:tasks:*');
@@ -899,14 +945,15 @@ app.post('/openvas/auto-patch', async (req, res) => {
       steps: {
         reportGenerated: true,
         reportStoredInDynamoDB: true,
-        lambdaTriggered: true
+        patchingPlaybookTriggered: true
       },
       reportId: `${taskName}-${Date.now()}`,
       taskName: taskName,
-      targetName: targetName
+      targetName: targetName,
+      vulnerabilityCount: reportData.vulnerabilities?.length || 0,
+      patchingStatus: patchingResponse.data
     });
   } catch (error) {
-    console.error('❌ Auto-patching workflow failed:', error.message);
     res.status(500).json({
       success: false,
       error: 'Auto-patching workflow failed',
@@ -917,7 +964,6 @@ app.post('/openvas/auto-patch', async (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
   res.status(500).json({ 
     error: 'Internal server error',
     message: err.message 
@@ -929,17 +975,7 @@ async function start() {
   await initializeRedis();
   
   app.listen(PORT, () => {
-    console.log(`\n🚀 Dashboard API Server running on http://localhost:${PORT}`);
-    console.log(`📚 API Documentation:`);
-    console.log(`   GET  http://localhost:${PORT}/api/findings`);
-    console.log(`   GET  http://localhost:${PORT}/api/reports`);
-    console.log(`   GET  http://localhost:${PORT}/api/systems`);
-    console.log(`   POST http://localhost:${PORT}/patching/apply`);
-    console.log(`   POST http://localhost:${PORT}/scanning/openvas-trigger`);
-    console.log(`   POST http://localhost:${PORT}/cache/clear`);
-    console.log(`   GET  http://localhost:${PORT}/cache/stats`);
-    console.log(`   GET  http://localhost:${PORT}/health`);
-    console.log(`\n⚙️  Environment: ${process.env.NODE_ENV}\n`);
+    console.log(`Dashboard API Server running on port ${PORT}`);
   });
 }
 

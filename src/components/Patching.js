@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import openvasService from '../services/openvasService'
 import './OpenVASConfig.css'
 
-export default function Patching() {
+export default React.memo(function Patching() {
   // OpenVAS State
   const [portLists, setPortLists] = useState([])
   const [targets, setTargets] = useState([])
@@ -109,7 +109,6 @@ export default function Patching() {
     
     try {
       // Phase 1: Check if report is generated in DynamoDB
-      console.log(`🔍 Checking for report in DynamoDB for task: ${taskName}`)
       setPatchingPhases(prev => ({ ...prev, [taskName]: 'checking-report' }))
       
       let reportExists = false
@@ -126,19 +125,16 @@ export default function Patching() {
           const checkData = await checkResponse.json()
           
           if (checkData.exists) {
-            console.log(`✅ Report found in DynamoDB for task: ${taskName}`)
             reportExists = true
             setPatchingPhases(prev => ({ ...prev, [taskName]: 'report-found' }))
             break
           } else {
             checkAttempts++
             if (checkAttempts < maxAttempts) {
-              console.log(`⏳ Report not yet generated, checking again in 10 seconds... (Attempt ${checkAttempts}/${maxAttempts})`)
               await new Promise(resolve => setTimeout(resolve, 10000)) // Wait 10 seconds before next check
             }
           }
         } catch (err) {
-          console.warn('Error checking report:', err.message)
           checkAttempts++
           if (checkAttempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 10000))
@@ -150,7 +146,6 @@ export default function Patching() {
       
       // If report not found after all attempts, show error but continue with patching attempt
       if (!reportExists) {
-        console.warn(`⚠️ Report not found in DynamoDB after ${maxAttempts} attempts, but proceeding with patching...`)
         setSuccessMsg(`⚠️ Report generation taking longer, initiating patching anyway for "${taskName}"`)
       } else {
         setSuccessMsg(`✅ Report generated and found in DynamoDB! Initiating patching for "${taskName}"`)
@@ -158,7 +153,6 @@ export default function Patching() {
       
       // Phase 2: Trigger auto-patching
       setPatchingPhases(prev => ({ ...prev, [taskName]: 'patching' }))
-      console.log(`🚀 Triggering auto-patching workflow...`)
       
       const response = await fetch('http://localhost:3005/openvas/auto-patch', {
         method: 'POST',
@@ -506,4 +500,4 @@ export default function Patching() {
       </footer>
     </div>
   )
-}
+})

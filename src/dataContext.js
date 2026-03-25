@@ -19,7 +19,6 @@ export function DataProvider({ children }){
       try{
         // Fetch from Redis-backed backend API
         // The backend checks Redis cache first, then hits AWS on miss
-        console.log('📡 Fetching vulnerability findings from backend API...')
         const res = await axios.get(`${API_BASE_URL}/api/findings`, { timeout: 15000 })
         if(cancelled) return
 
@@ -68,15 +67,10 @@ export function DataProvider({ children }){
           setData(payload)
           setDemoMode(false)
           setError(null)
-          console.log(`✅ Loaded ${payload.filter(x => x.item_type === 'finding').length} findings from backend`)
         }
       }catch(err){ 
         // On API error, use fallback mock data
         if(!cancelled) {
-          console.warn('⚠️ Backend API error, using demo data:', err.message)
-          console.warn('Make sure Redis and backend server are running:')
-          console.warn('  Redis:   docker compose up -d')
-          console.warn('  Backend: npm run server')
           const mockPayload = generateMockDataForDemo()
           setData(mockPayload)
           setDemoMode(true)

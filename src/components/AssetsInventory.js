@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react'
 
-export default function AssetsInventory({ findings = [], selectedHost = null, onSelectHost = ()=>{} }){
+export default React.memo(function AssetsInventory({ findings = [], selectedHost = null, onSelectHost = ()=>{} }){
   const hosts = useMemo(()=>{
     const map = new Map()
     findings.forEach(f=>{
@@ -60,4 +60,4 @@ export default function AssetsInventory({ findings = [], selectedHost = null, on
       )}
     </div>
   )
-}
+})

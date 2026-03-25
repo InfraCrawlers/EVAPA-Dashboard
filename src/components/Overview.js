@@ -38,7 +38,7 @@ function aggregateReports(reports){
   return { daily, weekly }
 }
 
-export default function Overview({ findings = [], summary = {}, critical=0, high=0, medium=0, low=0, hosts=0, cves=0, avgSeverity=0, onNavigate }){
+export default React.memo(function Overview({ findings = [], summary = {}, critical=0, high=0, medium=0, low=0, hosts=0, cves=0, avgSeverity=0, onNavigate }){
   const total = critical + high + medium + low || 1
 
   const reports = readLocalReports()
@@ -160,4 +160,4 @@ export default function Overview({ findings = [], summary = {}, critical=0, high
       )}
     </div>
   )
-}
+})

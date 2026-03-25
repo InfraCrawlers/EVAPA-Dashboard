@@ -27,7 +27,6 @@ export const openvasService = {
       const res = await backendClient.get('/openvas/port-lists');
       return res.data;
     } catch (err) {
-      console.error('Error fetching port lists:', err.message);
       throw err;
     }
   },
@@ -38,7 +37,6 @@ export const openvasService = {
       const res = await backendClient.get(`/openvas/port-lists?name=${encodedName}`);
       return res.data;
     } catch (err) {
-      console.error(`Error fetching port list ${name}:`, err.message);
       throw err;
     }
   },
@@ -51,7 +49,6 @@ export const openvasService = {
       });
       return res.data;
     } catch (err) {
-      console.error('Error creating port list:', err.message);
       throw err;
     }
   },
@@ -62,7 +59,6 @@ export const openvasService = {
       const res = await backendClient.get('/openvas/targets');
       return res.data;
     } catch (err) {
-      console.error('Error fetching targets:', err.message);
       throw err;
     }
   },
@@ -73,7 +69,6 @@ export const openvasService = {
       const res = await backendClient.get(`/openvas/targets?name=${encodedName}`);
       return res.data;
     } catch (err) {
-      console.error(`Error fetching target ${name}:`, err.message);
       throw err;
     }
   },
@@ -88,7 +83,6 @@ export const openvasService = {
       });
       return res.data;
     } catch (err) {
-      console.error('Error creating target:', err.message);
       throw err;
     }
   },
@@ -99,7 +93,6 @@ export const openvasService = {
       const res = await backendClient.get('/openvas/tasks');
       return res.data;
     } catch (err) {
-      console.error('Error fetching tasks:', err.message);
       throw err;
     }
   },
@@ -110,7 +103,6 @@ export const openvasService = {
       const res = await backendClient.get(`/openvas/task-progress/${encodedName}`);
       return res.data;
     } catch (err) {
-      console.error(`Error fetching task ${name}:`, err.message);
       throw err;
     }
   },
@@ -125,7 +117,6 @@ export const openvasService = {
       });
       return res.data;
     } catch (err) {
-      console.error('Error creating task:', err.message);
       throw err;
     }
   },
@@ -137,7 +128,6 @@ export const openvasService = {
       const res = await backendClient.post(`/openvas/tasks/${encodedName}/start`, {});
       return res.data;
     } catch (err) {
-      console.error(`Error starting scan for task ${taskName}:`, err.message);
       throw err;
     }
   },
@@ -156,7 +146,6 @@ export const openvasService = {
         lastUpdated: new Date().toISOString()
       };
     } catch (err) {
-      console.error(`Error getting progress for task ${taskName}:`, err.message);
       throw err;
     }
   }
