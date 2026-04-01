@@ -58,15 +58,23 @@ export default React.memo(function Patching() {
     return () => { cancelled = true; clearInterval(interval) }
   }, [])
 
+  // Helper: check if a task name indicates a "before patching" baseline scan
+  // These scans are run to capture the state BEFORE remediation — they should NOT trigger patching
+  const needsPatching = (taskName) => {
+    return !/before[\s_-]*patch/i.test(taskName)
+  }
+
   // Step 2: When tasks update AND patch statuses are loaded, auto-patch
   // any "Done" task that is NOT already recorded as patched in Redis.
   // Each task only triggers once per session (tracked by ref).
+  // "before patching" baseline scans are excluded.
   useEffect(() => {
     if (!patchStatusesLoaded || tasks.length === 0) return
     tasks.forEach((task) => {
       const name = task.name
       if (
         task.status?.toLowerCase() === 'done' &&
+        needsPatching(name) &&
         !alreadyPatched[name] &&
         !patchingInProgress[name] &&
         !patchTriggeredRef.current[name]
@@ -507,7 +515,7 @@ export default React.memo(function Patching() {
                   </div>
                 )}
                 {task.status?.toLowerCase() === 'done' && (
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: alreadyPatched[task.name] ? '#6fcf97' : patchingInProgress[task.name] ? '#ffd166' : '#5a9bd8' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: alreadyPatched[task.name] ? '#6fcf97' : patchingInProgress[task.name] ? '#ffd166' : !needsPatching(task.name) ? '#a8b6c5' : '#5a9bd8' }}>
                     {alreadyPatched[task.name] && !patchingInProgress[task.name]
                       ? `✅ Patched on ${new Date(alreadyPatched[task.name].patchedAt).toLocaleString()}`
                       : patchingInProgress[task.name]
@@ -520,7 +528,9 @@ export default React.memo(function Patching() {
                             if (phase === 'windows-running') return '🪟 Windows patching running...'
                             return '⏳ Auto-patching in progress...'
                           })()
-                        : '✅ Scan Complete'}
+                        : !needsPatching(task.name)
+                          ? '📊 Baseline Scan (no patching needed)'
+                          : '✅ Scan Complete'}
                   </div>
                 )}
               </div>
@@ -563,19 +573,19 @@ export default React.memo(function Patching() {
         {/* Tasks/Scanning Section - FIRST */}
         {renderTasks()}
 
-        {/* Patching Info Section - Shows only when scans are done */}
-        {tasks.some(t => t.status?.toLowerCase() === 'done') && (
+        {/* Patching Info Section - Shows only for patchable tasks (excludes "before patching" baseline scans) */}
+        {tasks.some(t => t.status?.toLowerCase() === 'done' && needsPatching(t.name)) && (
           <section className="ovconfig-section">
             <div className="ovconfig-header">
               <div>
                 <h3>🔧 Automated Patching</h3>
-                <p className="section-description">Patching status for completed scans</p>
+                <p className="section-description">Patching status for completed scans (baseline "before patching" scans are excluded)</p>
               </div>
             </div>
 
             <div style={{ padding: '20px', backgroundColor: 'rgba(111, 207, 151, 0.08)', borderRadius: '10px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100%, 1fr))', gap: '20px' }}>
-                {tasks.filter(t => t.status?.toLowerCase() === 'done').map((task) => (
+                {tasks.filter(t => t.status?.toLowerCase() === 'done' && needsPatching(t.name)).map((task) => (
                   <div key={task.id || task.task_id} style={{ padding: '15px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px', border: '1px solid rgba(111, 207, 151, 0.3)' }}>
                     <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px' }}>
                       🧪 {task.name}
