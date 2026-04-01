@@ -157,18 +157,12 @@
   }
 }
 
-/* Main container - 3 column layout */
+/* Main container - 2 column layout */
 .ovconfig-container {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 20px;
   margin-bottom: 24px;
-}
-
-@media (max-width: 1200px) {
-  .ovconfig-container {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 @media (max-width: 768px) {
@@ -231,6 +225,7 @@
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn-primary {

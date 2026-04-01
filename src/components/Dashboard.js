@@ -49,21 +49,36 @@ function DashboardContent(){
   if(error && !demoMode) return <div className="app-error">❌ Error: {error}</div>
 
   return (
-    <>
+    <div className="app-shell">
       {/* Demo Mode Banner */}
       {demoMode && (
         <div className="demo-banner">
           <strong>ℹ️ Demo Mode:</strong> The API is currently unavailable. Showing sample vulnerability data for demonstration purposes.
         </div>
       )}
+
+      {/* Full-width Header */}
+      <header className="app-header">
+        <div className="app-header-inner">
+          <div className="app-header-left">
+            <div className="brand-mark">VD</div>
+            <div>
+              <div className="app-header-title">EVAPA Security Dashboard</div>
+              <div className="app-header-subtitle">Enterprise Vulnerability Assessment & Patch Automation</div>
+            </div>
+          </div>
+          <div className="app-header-right">
+            <button className="mobile-menu-btn" onClick={handleSidebarToggle} aria-expanded={sidebarOpen} title="Menu">
+              ☰
+            </button>
+            <span className="header-badge">Group 4 Capstone</span>
+          </div>
+        </div>
+      </header>
       
       <div className="app-root">
         {/* Sidebar */}
         <aside className={`sidebar${sidebarOpen? ' open':''}`} aria-hidden={!sidebarOpen}>
-        <div className="sidebar-brand">
-          <div className="brand-mark">VD</div>
-          <div className="brand-title">Vulnerability Dashboard</div>
-        </div>
         <nav>
           <button className={`sidebar-btn${activeTab==='overview'?' active':''}`} onClick={()=> handleTabChange('overview')}>
             <span className="sidebar-emoji" aria-hidden="true">🏠</span>
@@ -94,15 +109,9 @@ function DashboardContent(){
 
       {/* Main Content */}
       <div className="main" onClick={closeSidebar}>
-        <header className="topbar">
-          <button className="mobile-menu-btn" onClick={handleSidebarToggle} aria-expanded={sidebarOpen} title="Menu">
-            <span className="brand-mark small">VD</span>
-          </button>
-          <div className="topbar-left" />
-        </header>
         <main className="content">
           <Suspense fallback={<div className="app-loading">⏳ Loading...</div>}>
-            {activeTab === 'overview' ? (
+            <div style={{ display: activeTab === 'overview' ? 'block' : 'none' }}>
               <Overview
                 findings={findings}
                 summary={summary}
@@ -115,23 +124,33 @@ function DashboardContent(){
                 avgSeverity={avgSeverity}
                 onNavigate={handleTabChange}
               />
-            ) : activeTab === 'vulnerabilities' ? (
+            </div>
+            <div style={{ display: activeTab === 'vulnerabilities' ? 'block' : 'none' }}>
               <Vulnerabilities findings={findings} />
-            ) : activeTab === 'assets' ? (
+            </div>
+            <div style={{ display: activeTab === 'assets' ? 'block' : 'none' }}>
               <AssetsInventory findings={findings} selectedHost={selectedHost} onSelectHost={(h)=>{ setSelectedHost(h); handleTabChange('assets') }} />
-            ) : activeTab === 'history' ? (
+            </div>
+            <div style={{ display: activeTab === 'history' ? 'block' : 'none' }}>
               <History />
-            ) : activeTab === 'patching' ? (
+            </div>
+            <div style={{ display: activeTab === 'patching' ? 'block' : 'none' }}>
               <Patching />
-            ) : activeTab === 'openvas' ? (
+            </div>
+            <div style={{ display: activeTab === 'openvas' ? 'block' : 'none' }}>
               <OpenVASConfig />
-            ) : null}
+            </div>
           </Suspense>
         </main>
-        <footer className="footer">© 2026 Group 4 Capstone — Security Assessment Dashboard</footer>
+        <footer className="footer">
+          <div className="footer-inner">
+            <div className="footer-main">© 2026 Group 4 Capstone — Security Assessment Dashboard</div>
+            <div className="footer-members">Tharuka Kannangara • Swagat Koirala • Abid Al Mohaimin • Rupesh Limbadri Vanneldas • Dillon Wijayanayagam</div>
+          </div>
+        </footer>
       </div>
       </div>
-    </>
+    </div>
   )
 }
 

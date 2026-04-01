@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import axios from 'axios'
 import { generateMockDataForDemo } from './mockData'
 
@@ -7,87 +7,80 @@ const DataContext = createContext(null)
 // API Base URL - Redis-backed backend is REQUIRED
 const API_BASE_URL = 'http://localhost:3005'
 
+// Normalize raw API response to internal format
+function normalizePayload(rawData) {
+  let payload = rawData
+  if(payload && typeof payload.body === 'string'){
+    try{ payload = JSON.parse(payload.body) }catch(e){ /* keep original */ }
+  }
+  if(Array.isArray(payload)){
+    try{
+      const transformed = []
+      payload.forEach(rep => {
+        const reportSummary = {
+          item_type: 'report_summary',
+          scan_start: rep.processed_timestamp || rep.sk || rep.scan_start || null,
+          report_id: rep.pk || rep.id || null,
+          total_high_severity_count: rep.total_high_severity_count || 0,
+          raw: rep
+        }
+        transformed.push(reportSummary)
+        const vulns = Array.isArray(rep.vulnerabilities) ? rep.vulnerabilities : []
+        vulns.forEach(v=>{
+          transformed.push({
+            item_type: 'finding',
+            report_id: rep.pk || rep.id || null,
+            report_timestamp: rep.processed_timestamp || rep.sk || rep.scan_start || null,
+            name: v.vulnerability_name || v.name || 'Unnamed',
+            host: v.host || v.hostname || v.asset || 'unknown',
+            port: v.port || undefined,
+            severity: v.threat_level || v.severity || 'Unknown',
+            severity_num: (typeof v.cvss_severity === 'number') ? v.cvss_severity : (Number(v.cvss_severity) || 0),
+            cvss: v.cvss_severity || v.cvss || null,
+            cves: v.nvt_oid ? [v.nvt_oid] : (v.cves || []),
+            description: v.description || '',
+            reference: v.nvt_oid ? `nvt:${v.nvt_oid}` : v.reference || '',
+            raw: v
+          })
+        })
+      })
+      return transformed
+    }catch(e){ /* fall back to original payload */ }
+  }
+  return payload
+}
+
 export function DataProvider({ children }){
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [demoMode, setDemoMode] = useState(false)
 
-  useEffect(()=>{
-    let cancelled = false
-    async function fetchData(){
-      try{
-        // Fetch from Redis-backed backend API
-        // The backend checks Redis cache first, then hits AWS on miss
-        const res = await axios.get(`${API_BASE_URL}/api/findings`, { timeout: 15000 })
-        if(cancelled) return
-
-        // Process response
-        let payload = res.data
-        if(payload && typeof payload.body === 'string'){
-          try{ payload = JSON.parse(payload.body) }catch(e){ /* keep original */ }
-        }
-
-        // Normalize the API shape: if payload is an array of report objects with `vulnerabilities`,
-        // transform to the internal format: array with a report_summary item and finding items.
-        if(Array.isArray(payload)){
-          try{
-            const transformed = []
-            payload.forEach(rep => {
-              const reportSummary = {
-                item_type: 'report_summary',
-                scan_start: rep.processed_timestamp || rep.sk || rep.scan_start || null,
-                report_id: rep.pk || rep.id || null,
-                total_high_severity_count: rep.total_high_severity_count || 0,
-                raw: rep
-              }
-              transformed.push(reportSummary)
-              const vulns = Array.isArray(rep.vulnerabilities) ? rep.vulnerabilities : []
-              vulns.forEach(v=>{
-                transformed.push({
-                  item_type: 'finding',
-                  report_id: rep.pk || rep.id || null,
-                  report_timestamp: rep.processed_timestamp || rep.sk || rep.scan_start || null,
-                  name: v.vulnerability_name || v.name || 'Unnamed',
-                  host: v.host || v.hostname || v.asset || 'unknown',
-                  port: v.port || undefined,
-                  severity: v.threat_level || v.severity || 'Unknown',
-                  severity_num: (typeof v.cvss_severity === 'number') ? v.cvss_severity : (Number(v.cvss_severity) || 0),
-                  cvss: v.cvss_severity || v.cvss || null,
-                  cves: v.nvt_oid ? [v.nvt_oid] : (v.cves || []),
-                  description: v.description || '',
-                  reference: v.nvt_oid ? `nvt:${v.nvt_oid}` : v.reference || '',
-                  raw: v
-                })
-              })
-            })
-            payload = transformed
-          }catch(e){ /* fall back to original payload */ }
-        }
-
-        if(!cancelled) {
-          setData(payload)
-          setDemoMode(false)
-          setError(null)
-        }
-      }catch(err){ 
-        // On API error, use fallback mock data
-        if(!cancelled) {
-          const mockPayload = generateMockDataForDemo()
-          setData(mockPayload)
-          setDemoMode(true)
-          setError(null) // Don't show error since we have fallback data
-        }
-      }finally{ 
-        if(!cancelled) setLoading(false) 
-      }
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    try{
+      const res = await axios.get(`${API_BASE_URL}/api/findings`, { timeout: 15000 })
+      const payload = normalizePayload(res.data)
+      setData(payload)
+      setDemoMode(false)
+      setError(null)
+    }catch(err){ 
+      // On API error, use fallback mock data
+      const mockPayload = generateMockDataForDemo()
+      setData(mockPayload)
+      setDemoMode(true)
+      setError(null)
+    }finally{ 
+      setLoading(false) 
     }
+  }, [])
+
+  useEffect(()=>{
     fetchData()
-    return ()=>{ cancelled = true }
-  },[])
+  },[fetchData])
 
   return (
-    <DataContext.Provider value={{data, loading, error, demoMode}}>
+    <DataContext.Provider value={{data, loading, error, demoMode, refreshData: fetchData}}>
       {children}
     </DataContext.Provider>
   )

@@ -23,19 +23,21 @@ let redisClient = null;
 // Initialize Redis Client
 async function initializeRedis() {
   try {
-    redisClient = redis.createClient({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: process.env.REDIS_PORT || 6379,
+    const client = redis.createClient({
+      url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
       password: process.env.REDIS_PASSWORD || undefined,
       socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 50, 500)
+        reconnectStrategy: false // Don't auto-reconnect if Redis is unavailable
       }
     });
 
-    redisClient.on('error', (err) => console.error('Redis Client Error', err));
+    client.on('error', () => {}); // Suppress noisy error logs
     
-    await redisClient.connect();
+    await client.connect();
+    redisClient = client;
+    console.log('Redis connected successfully');
   } catch (error) {
+    console.log('Redis unavailable — running without cache');
     redisClient = null;
   }
 }
@@ -216,6 +218,32 @@ app.get('/api/systems', async (req, res) => {
 });
 
 /**
+ * GET /api/patch-reports
+ * Returns all patching reports from Redis (linuxResult + windowsResult per task)
+ */
+app.get('/api/patch-reports', async (req, res) => {
+  try {
+    if (!redisClient) return res.json({ reports: [] });
+    const keys = await redisClient.keys('patched:*');
+    const reports = [];
+    for (const key of keys) {
+      const raw = await redisClient.get(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.patched && parsed.status === 'completed') {
+          reports.push(parsed);
+        }
+      }
+    }
+    // Sort by patchedAt descending
+    reports.sort((a, b) => (b.patchedAt || '').localeCompare(a.patchedAt || ''));
+    res.json({ reports });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch patch reports', message: error.message, reports: [] });
+  }
+});
+
+/**
  * POST /patching/apply
  * Trigger patching - invalidates related caches
  */
@@ -255,6 +283,103 @@ app.post('/scanning/openvas-trigger', async (req, res) => {
       error: 'Scanning failed',
       message: error.message
     });
+  }
+});
+
+/**
+ * ==========================================
+ * PATCHING API ROUTES (Linux + Windows)
+ * ==========================================
+ */
+
+/**
+ * POST /patching/start-linux - Start Linux patching playbook
+ */
+app.post('/patching/start-linux', async (req, res) => {
+  try {
+    const response = await axios.post(`${PATCHING_API_BASE}/run-playbook`, {}, {
+      timeout: 30000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to start Linux patching', message: error.message });
+  }
+});
+
+/**
+ * POST /patching/check-linux-status - Check Linux patching status
+ */
+app.post('/patching/check-linux-status', async (req, res) => {
+  try {
+    const { command_id } = req.body;
+    if (!command_id) return res.status(400).json({ error: 'command_id is required' });
+    const response = await axios.post(`${PATCHING_API_BASE}/check-status`, { command_id }, {
+      timeout: 30000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check Linux patching status', message: error.message });
+  }
+});
+
+/**
+ * POST /patching/start-windows - Start Windows patching playbook
+ */
+app.post('/patching/start-windows', async (req, res) => {
+  try {
+    const response = await axios.post(`${PATCHING_API_BASE}/run-windows-playbook`, {}, {
+      timeout: 30000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to start Windows patching', message: error.message });
+  }
+});
+
+/**
+ * POST /patching/check-windows-status - Check Windows patching status
+ */
+app.post('/patching/check-windows-status', async (req, res) => {
+  try {
+    const { command_id } = req.body;
+    if (!command_id) return res.status(400).json({ error: 'command_id is required' });
+    const response = await axios.post(`${PATCHING_API_BASE}/check-windows-status`, { command_id }, {
+      timeout: 30000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check Windows patching status', message: error.message });
+  }
+});
+
+/**
+ * POST /patching/mark-complete - Mark patching as completed for a task
+ */
+app.post('/patching/mark-complete', async (req, res) => {
+  try {
+    const { taskName, targetName, linuxResult, windowsResult } = req.body;
+    await cache.set(`patched:${taskName}`, {
+      patched: true,
+      patchedAt: new Date().toISOString(),
+      taskName,
+      targetName,
+      status: 'completed',
+      linuxResult: linuxResult || null,
+      windowsResult: windowsResult || null
+    }, 60 * 60 * 24 * 30);
+    
+    // Invalidate caches so overview gets fresh data
+    await cache.invalidate('dashboard:*');
+    await cache.invalidate('findings:*');
+    await cache.invalidate('reports:*');
+    
+    res.json({ success: true, message: `Patching marked complete for "${taskName}"` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark patching complete', message: error.message });
   }
 });
 
@@ -400,6 +525,7 @@ app.get('/aws/ec2-instances', async (req, res) => {
  */
 
 const AWS_PATCHING_API = process.env.AWS_PATCHING_API;
+const PATCHING_API_BASE = 'https://sgjc9f1kv7.execute-api.us-east-1.amazonaws.com/prod';
 
 /**
  * POST /aws/run-playbook - Trigger AWS patching playbook with caching
@@ -1086,57 +1212,24 @@ app.post('/openvas/auto-patch', async (req, res) => {
       await cache.set(cacheKeyDynamo, dynamoResponse.data, ttl);
     }
     
-    // Step 3: Trigger AWS Patching Playbook with caching
-    const patchingPayload = {
-      taskName,
-      targetName,
-      vulnerabilities: reportData.vulnerabilities || []
-    };
-    
-    // Call the new patching API endpoint (which has caching built in)
-    const patchingResponse = await axios.post(
-      'http://localhost:3005/aws/run-playbook',
-      patchingPayload,
-      { timeout: 30000 }
-    ).catch(err => {
-      return { 
-        data: { 
-          success: true, 
-          message: 'Patching triggered (async)',
-          error: err.message 
-        } 
-      };
-    });
-    
     // Cache invalidation
     await cache.invalidate('openvas:tasks:*');
     await cache.invalidate(`openvas:task-progress:${taskName}`);
     await cache.invalidate('dashboard:*');
     
+    // Return report info — frontend handles the actual patching via new Linux/Windows endpoints
     res.json({
       success: true,
-      message: `Auto-patching workflow completed for "${taskName}"`,
+      message: `Report generated for "${taskName}" — patching will be handled by frontend`,
       steps: {
         reportGenerated: true,
-        reportStoredInDynamoDB: true,
-        patchingPlaybookTriggered: true
+        reportStoredInDynamoDB: true
       },
       reportId: `${taskName}-${Date.now()}`,
       taskName: taskName,
       targetName: targetName,
-      vulnerabilityCount: reportData.vulnerabilities?.length || 0,
-      patchingStatus: patchingResponse.data
+      vulnerabilityCount: reportData.vulnerabilities?.length || 0
     });
-    
-    // Update patch record with final details
-    await cache.set(`patched:${taskName}`, {
-      patched: true,
-      patchedAt,
-      taskName,
-      targetName,
-      vulnerabilityCount: reportData.vulnerabilities?.length || 0,
-      status: 'completed'
-    }, 60 * 60 * 24 * 30);
   } catch (error) {
     // Even on error, keep the patch record so it doesn't re-trigger
     // (the record was already written at the start)

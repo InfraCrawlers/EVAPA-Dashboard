@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import openvasService from '../services/openvasService'
+import { useData } from '../dataContext'
 import './OpenVASConfig.css'
 
 export default React.memo(function Patching() {
@@ -16,6 +17,10 @@ export default React.memo(function Patching() {
   const [patchingPhases, setPatchingPhases] = useState({})
   const [alreadyPatched, setAlreadyPatched] = useState({})
   const [patchStatusesLoaded, setPatchStatusesLoaded] = useState(false)
+  const [patchResults, setPatchResults] = useState({})
+  const [detailModal, setDetailModal] = useState(null)
+
+  const { refreshData } = useData()
 
   // Ref to prevent duplicate patch triggers within a single session
   const patchTriggeredRef = useRef({})
@@ -29,10 +34,17 @@ export default React.memo(function Patching() {
         const data = await res.json()
         if (!cancelled && data.statuses) {
           const patched = {}
+          const results = {}
           Object.entries(data.statuses).forEach(([taskName, status]) => {
-            if (status.patched) patched[taskName] = status
+            if (status.patched) {
+              patched[taskName] = status
+              if (status.linuxResult || status.windowsResult) {
+                results[taskName] = { linux: status.linuxResult || null, windows: status.windowsResult || null }
+              }
+            }
           })
           setAlreadyPatched(patched)
+          setPatchResults(prev => ({ ...prev, ...results }))
         }
       } catch (err) { /* ignore */ }
       if (!cancelled) {
@@ -133,14 +145,17 @@ export default React.memo(function Patching() {
   }
 
   // Auto-trigger patching when scan is done
-  // Calls the server endpoint which handles everything (report check, DynamoDB, Lambda).
-  // Server records patch status immediately so duplicates are impossible.
+  // Step 1: Generate report (server-side)
+  // Step 2: Start Linux patching, poll until complete
+  // Step 3: Start Windows patching, poll until complete
+  // Step 4: Mark complete and refresh overview data
   const handleAutoPatching = async (taskName, task) => {
     setPatchingInProgress(prev => ({ ...prev, [taskName]: true }))
-    setPatchingPhases(prev => ({ ...prev, [taskName]: 'patching' }))
+    setPatchingPhases(prev => ({ ...prev, [taskName]: 'report' }))
     
     try {
-      const response = await fetch('http://localhost:3005/openvas/auto-patch', {
+      // Step 0: Generate report and record in Redis
+      const autoRes = await fetch('http://localhost:3005/openvas/auto-patch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -150,22 +165,99 @@ export default React.memo(function Patching() {
           scanStatus: task.status
         })
       })
-
-      const data = await response.json()
+      const autoData = await autoRes.json()
       
-      if (data.alreadyPatched) {
+      if (autoData.alreadyPatched) {
         setPatchingPhases(prev => ({ ...prev, [taskName]: 'already-patched' }))
-        setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: data.patchedAt } }))
-      } else if (response.ok) {
-        setPatchingPhases(prev => ({ ...prev, [taskName]: 'completed' }))
-        setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: new Date().toISOString() } }))
-      } else {
-        setPatchingPhases(prev => ({ ...prev, [taskName]: 'error' }))
-        setError(`Failed to trigger patching: ${data.message}`)
+        setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: autoData.patchedAt } }))
+        return
       }
+
+      // Step 1: Start Linux patching
+      setPatchingPhases(prev => ({ ...prev, [taskName]: 'linux-starting' }))
+      let linuxResult = null
+      try {
+        const linuxRes = await fetch('http://localhost:3005/patching/start-linux', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        const linuxData = await linuxRes.json()
+        const linuxCommandId = linuxData.command_id
+
+        if (linuxCommandId) {
+          setPatchingPhases(prev => ({ ...prev, [taskName]: 'linux-running' }))
+          for (let i = 0; i < 40; i++) {
+            await new Promise(r => setTimeout(r, 15000))
+            const statusRes = await fetch('http://localhost:3005/patching/check-linux-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ command_id: linuxCommandId })
+            })
+            const statusData = await statusRes.json()
+            if (statusData.execution_status !== 'Still running') {
+              linuxResult = statusData
+              break
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Linux patching error:', err)
+      }
+
+      // Step 2: Start Windows patching
+      setPatchingPhases(prev => ({ ...prev, [taskName]: 'windows-starting' }))
+      let windowsResult = null
+      try {
+        const winRes = await fetch('http://localhost:3005/patching/start-windows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        const winData = await winRes.json()
+        const winCommandId = winData.command_id
+
+        if (winCommandId) {
+          setPatchingPhases(prev => ({ ...prev, [taskName]: 'windows-running' }))
+          for (let i = 0; i < 40; i++) {
+            await new Promise(r => setTimeout(r, 15000))
+            const statusRes = await fetch('http://localhost:3005/patching/check-windows-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ command_id: winCommandId })
+            })
+            const statusData = await statusRes.json()
+            if (statusData.execution_status !== 'Still running') {
+              windowsResult = statusData
+              break
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Windows patching error:', err)
+      }
+
+      // Store results for display
+      setPatchResults(prev => ({ ...prev, [taskName]: { linux: linuxResult, windows: windowsResult } }))
+
+      // Mark patching as complete on server
+      await fetch('http://localhost:3005/patching/mark-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskName,
+          targetName: task.target_name,
+          linuxResult,
+          windowsResult
+        })
+      })
+
+      setPatchingPhases(prev => ({ ...prev, [taskName]: 'completed' }))
+      setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: new Date().toISOString() } }))
+
+      // Refresh overview data with post-patch results
+      if (refreshData) refreshData()
     } catch (err) {
       setPatchingPhases(prev => ({ ...prev, [taskName]: 'error' }))
-      setError(`Error triggering patching: ${err.message}`)
+      setError(`Error during patching: ${err.message}`)
     } finally {
       setPatchingInProgress(prev => ({ ...prev, [taskName]: false }))
     }
@@ -349,10 +441,18 @@ export default React.memo(function Patching() {
                 )}
                 {task.status?.toLowerCase() === 'done' && (
                   <div style={{ fontSize: '13px', fontWeight: 600, color: alreadyPatched[task.name] ? '#6fcf97' : patchingInProgress[task.name] ? '#ffd166' : '#5a9bd8' }}>
-                    {alreadyPatched[task.name]
+                    {alreadyPatched[task.name] && !patchingInProgress[task.name]
                       ? `✅ Patched on ${new Date(alreadyPatched[task.name].patchedAt).toLocaleString()}`
                       : patchingInProgress[task.name]
-                        ? '⏳ Auto-patching in progress...'
+                        ? (() => {
+                            const phase = patchingPhases[task.name]
+                            if (phase === 'report') return '📋 Generating report...'
+                            if (phase === 'linux-starting') return '🐧 Starting Linux patching...'
+                            if (phase === 'linux-running') return '🐧 Linux patching running...'
+                            if (phase === 'windows-starting') return '🪟 Starting Windows patching...'
+                            if (phase === 'windows-running') return '🪟 Windows patching running...'
+                            return '⏳ Auto-patching in progress...'
+                          })()
                         : '✅ Scan Complete'}
                   </div>
                 )}
@@ -403,27 +503,102 @@ export default React.memo(function Patching() {
                     <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px' }}>
                       🧪 {task.name}
                     </div>
-                    <div style={{ fontSize: '13px', lineHeight: '2', color: '#bbb' }}>
-                      {patchingPhases[task.name] === 'patching' && (
+                    <div style={{ fontSize: '13px', lineHeight: '1.8', color: '#bbb' }}>
+                      {/* Report phase */}
+                      {patchingPhases[task.name] === 'report' && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(90, 155, 216, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          📋 Generating scan report...
+                        </div>
+                      )}
+                      {/* Linux patching phases */}
+                      {patchingPhases[task.name] === 'linux-starting' && (
                         <div style={{ padding: '8px 12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                          🚀 Triggering AWS Lambda for patching...
+                          🐧 Starting Linux patching playbook...
                         </div>
                       )}
+                      {patchingPhases[task.name] === 'linux-running' && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          🐧 Linux patching running... (polling every 15s)
+                        </div>
+                      )}
+                      {/* Windows patching phases */}
+                      {patchingPhases[task.name] === 'windows-starting' && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          🐧 Linux done • 🪟 Starting Windows patching...
+                        </div>
+                      )}
+                      {patchingPhases[task.name] === 'windows-running' && (
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(243, 156, 18, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          🐧 Linux ✅ • 🪟 Windows patching running... (polling every 15s)
+                        </div>
+                      )}
+                      {/* Completed with results */}
                       {patchingPhases[task.name] === 'completed' && (
-                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                          ✅ Patching Applied
+                        <div style={{ padding: '12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
+                          <div style={{ fontWeight: 600, marginBottom: '8px' }}>✅ Patching Complete</div>
+                          {patchResults[task.name]?.linux && (
+                            <div style={{ marginBottom: '8px', padding: '8px', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '4px' }}>
+                              <div style={{ fontWeight: 600, marginBottom: '4px' }}>🐧 Linux: {patchResults[task.name].linux.overall_status || patchResults[task.name].linux.execution_status}</div>
+                              {patchResults[task.name].linux.summary && (
+                                <div style={{ fontSize: '12px', color: '#aaa' }}>
+                                  OK: {patchResults[task.name].linux.summary.ok} • Changed: {patchResults[task.name].linux.summary.changed} • Failed: {patchResults[task.name].linux.summary.failed} • Skipped: {patchResults[task.name].linux.summary.skipped}
+                                </div>
+                              )}
+                              {patchResults[task.name].linux.tasks && (
+                                <div style={{ marginTop: '6px', fontSize: '11px' }}>
+                                  {patchResults[task.name].linux.tasks.map((t, i) => (
+                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                                      <span>{t.task}</span>
+                                      <span style={{ color: t.status === 'changed' ? '#ffd166' : t.status === 'failed' ? '#e74c3c' : '#6fcf97' }}>{t.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {patchResults[task.name]?.windows && (
+                            <div style={{ padding: '8px', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '4px' }}>
+                              <div style={{ fontWeight: 600, marginBottom: '4px' }}>🪟 Windows: {patchResults[task.name].windows.overall_status || patchResults[task.name].windows.execution_status}</div>
+                              {patchResults[task.name].windows.summary && (
+                                <div style={{ fontSize: '12px', color: '#aaa' }}>
+                                  OK: {patchResults[task.name].windows.summary.ok} • Changed: {patchResults[task.name].windows.summary.changed} • Failed: {patchResults[task.name].windows.summary.failed} • Skipped: {patchResults[task.name].windows.summary.skipped}
+                                </div>
+                              )}
+                              {patchResults[task.name].windows.tasks && (
+                                <div style={{ marginTop: '6px', fontSize: '11px' }}>
+                                  {patchResults[task.name].windows.tasks.map((t, i) => (
+                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                                      <span>{t.task}</span>
+                                      <span style={{ color: t.status === 'changed' ? '#ffd166' : t.status === 'failed' ? '#e74c3c' : '#6fcf97' }}>{t.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
+                      {/* Error */}
                       {patchingPhases[task.name] === 'error' && (
                         <div style={{ padding: '8px 12px', backgroundColor: 'rgba(231, 76, 60, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
                           ❌ Patching failed
                         </div>
                       )}
+                      {/* Already patched */}
                       {(patchingPhases[task.name] === 'already-patched' || (!patchingPhases[task.name] && alreadyPatched[task.name])) && (
-                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
-                          ✅ Patched on {new Date(alreadyPatched[task.name]?.patchedAt).toLocaleString()}
+                        <div style={{ padding: '8px 12px', backgroundColor: 'rgba(111, 207, 151, 0.1)', borderRadius: '6px', marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 600 }}>✅ Patched on {new Date(alreadyPatched[task.name]?.patchedAt).toLocaleString()}</span>
+                          {patchResults[task.name] && (
+                            <button
+                              onClick={() => setDetailModal(task.name)}
+                              style={{ padding: '4px 14px', borderRadius: '6px', border: '1px solid rgba(111,207,151,0.4)', background: 'rgba(111,207,151,0.12)', color: '#6fcf97', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              View Details
+                            </button>
+                          )}
                         </div>
                       )}
+                      {/* Awaiting */}
                       {!patchingPhases[task.name] && !alreadyPatched[task.name] && (
                         <div style={{ padding: '8px 12px', backgroundColor: 'rgba(90, 155, 216, 0.1)', borderRadius: '6px', marginTop: '8px' }}>
                           ✅ Scan Complete — Awaiting patch trigger
@@ -466,7 +641,12 @@ export default React.memo(function Patching() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '32px', marginBottom: '10px' }}>4️⃣</div>
                 <div style={{ fontWeight: 600, marginBottom: '5px' }}>Auto-Patch</div>
-                <div style={{ fontSize: '12px', color: '#888' }}>AWS Lambda applies patches</div>
+                <div style={{ fontSize: '12px', color: '#888' }}>Linux + Windows patching with status polling</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '32px', marginBottom: '10px' }}>5️⃣</div>
+                <div style={{ fontWeight: 600, marginBottom: '5px' }}>Update Dashboard</div>
+                <div style={{ fontSize: '12px', color: '#888' }}>Overview refreshes with patched results</div>
               </div>
             </div>
           </div>
@@ -475,12 +655,126 @@ export default React.memo(function Patching() {
 
       <footer className="ovconfig-footer">
         <div className="footer-content">
-          <small>🔗 OpenVAS Endpoint: edonu024me.execute-api.us-east-1.amazonaws.com/v1</small>
+          <small>🔗 OpenVAS: edonu024me.execute-api.us-east-1.amazonaws.com/v1 | Patching: sgjc9f1kv7.execute-api.us-east-1.amazonaws.com/prod</small>
         </div>
         <div className="footer-stats">
-          <small>⚡ Patching workflow is fully automated upon scan completion</small>
+          <small>⚡ Scan → Report → Linux Patch → Windows Patch → Refresh Dashboard</small>
         </div>
       </footer>
+
+      {/* Patch Details Modal */}
+      {detailModal && patchResults[detailModal] && (
+        <div onClick={() => setDetailModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, backdropFilter: 'blur(4px)' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#1a1d23', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', padding: '28px', width: '90%', maxWidth: '700px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '18px' }}>🔧 Patch Report</div>
+                <div style={{ fontSize: '13px', color: '#888', marginTop: '4px' }}>{detailModal}</div>
+              </div>
+              <button onClick={() => setDetailModal(null)} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#aaa', fontSize: '18px', width: '36px', height: '36px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+            </div>
+
+            <div style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>
+              Patched on {new Date(alreadyPatched[detailModal]?.patchedAt).toLocaleString()} • Target: {alreadyPatched[detailModal]?.targetName || 'N/A'}
+            </div>
+
+            {(() => {
+              const hasLinux = patchResults[detailModal].linux?.overall_status
+              const hasWindows = patchResults[detailModal].windows?.overall_status
+              const cols = (hasLinux && hasWindows) ? '1fr 1fr' : '1fr'
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '16px' }}>
+                  {hasLinux && (
+                    <div style={{ padding: '16px', borderRadius: '10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        🐧 Linux Patching
+                        <span style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '8px', fontWeight: 600,
+                          background: patchResults[detailModal].linux.overall_status === 'Success' ? 'rgba(111,207,151,0.15)' : 'rgba(231,76,60,0.15)',
+                          color: patchResults[detailModal].linux.overall_status === 'Success' ? '#6fcf97' : '#e74c3c'
+                        }}>{patchResults[detailModal].linux.overall_status}</span>
+                      </div>
+                      {patchResults[detailModal].linux?.summary && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px', marginBottom: '14px' }}>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(111,207,151,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#6fcf97' }}>{patchResults[detailModal].linux.summary.ok}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>OK</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(255,209,102,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#ffd166' }}>{patchResults[detailModal].linux.summary.changed}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>Changed</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(231,76,60,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#e74c3c' }}>{patchResults[detailModal].linux.summary.failed}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>Failed</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(150,150,150,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#888' }}>{patchResults[detailModal].linux.summary.skipped}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>Skipped</div>
+                          </div>
+                        </div>
+                      )}
+                      {patchResults[detailModal].linux?.tasks && (
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: '#888', marginBottom: '6px' }}>Playbook Tasks</div>
+                          {patchResults[detailModal].linux.tasks.map((t, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', borderRadius: '4px', marginBottom: '3px', background: 'rgba(255,255,255,0.03)', fontSize: '12px' }}>
+                              <span style={{ color: '#ccc' }}>{t.task}</span>
+                              <span style={{ fontWeight: 600, color: t.status === 'changed' ? '#ffd166' : t.status === 'failed' ? '#e74c3c' : '#6fcf97' }}>{t.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {hasWindows && (
+                    <div style={{ padding: '16px', borderRadius: '10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        🪟 Windows Patching
+                        <span style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '8px', fontWeight: 600,
+                          background: patchResults[detailModal].windows.overall_status === 'Success' ? 'rgba(111,207,151,0.15)' : 'rgba(231,76,60,0.15)',
+                          color: patchResults[detailModal].windows.overall_status === 'Success' ? '#6fcf97' : '#e74c3c'
+                        }}>{patchResults[detailModal].windows.overall_status}</span>
+                      </div>
+                      {patchResults[detailModal].windows?.summary && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '8px', marginBottom: '14px' }}>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(111,207,151,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#6fcf97' }}>{patchResults[detailModal].windows.summary.ok}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>OK</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(255,209,102,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#ffd166' }}>{patchResults[detailModal].windows.summary.changed}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>Changed</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(231,76,60,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#e74c3c' }}>{patchResults[detailModal].windows.summary.failed}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>Failed</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '8px', borderRadius: '8px', background: 'rgba(150,150,150,0.1)' }}>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#888' }}>{patchResults[detailModal].windows.summary.skipped}</div>
+                            <div style={{ fontSize: '10px', color: '#888' }}>Skipped</div>
+                          </div>
+                        </div>
+                      )}
+                      {patchResults[detailModal].windows?.tasks && (
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: '#888', marginBottom: '6px' }}>Playbook Tasks</div>
+                          {patchResults[detailModal].windows.tasks.map((t, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', borderRadius: '4px', marginBottom: '3px', background: 'rgba(255,255,255,0.03)', fontSize: '12px' }}>
+                              <span style={{ color: '#ccc' }}>{t.task}</span>
+                              <span style={{ fontWeight: 600, color: t.status === 'changed' ? '#ffd166' : t.status === 'failed' ? '#e74c3c' : '#6fcf97' }}>{t.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   )
 })
