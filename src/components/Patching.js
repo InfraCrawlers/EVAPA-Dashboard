@@ -273,6 +273,14 @@ export default React.memo(function Patching() {
     } catch (err) {
       setPatchingPhases(prev => ({ ...prev, [taskName]: 'error' }))
       setError(`Error during patching: ${err.message}`)
+      // Still mark as complete so it doesn't get stuck as in-progress in Redis
+      try {
+        await fetch('http://localhost:3005/patching/mark-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskName, targetName: task.target_name, linuxResult: null, windowsResult: null })
+        })
+      } catch (_) { /* ignore */ }
     } finally {
       setPatchingInProgress(prev => ({ ...prev, [taskName]: false }))
     }

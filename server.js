@@ -1143,7 +1143,7 @@ app.post('/openvas/auto-patch', async (req, res) => {
     
     // Guard: check if this task was already patched (persistent in Redis with long TTL)
     const alreadyPatched = await cache.get(`patched:${taskName}`);
-    if (alreadyPatched) {
+    if (alreadyPatched && alreadyPatched.status === 'completed') {
       return res.json({
         success: true,
         alreadyPatched: true,
@@ -1153,15 +1153,19 @@ app.post('/openvas/auto-patch', async (req, res) => {
       });
     }
 
-    // IMMEDIATELY record as patched so no duplicate calls can start the workflow again
-    const patchedAt = new Date().toISOString();
-    await cache.set(`patched:${taskName}`, {
-      patched: true,
-      patchedAt,
-      taskName,
-      targetName,
-      status: 'in-progress'
-    }, 60 * 60 * 24 * 30); // 30 days
+    // Use a short-lived lock to prevent duplicate concurrent triggers (5 min TTL)
+    const lockKey = `patch-lock:${taskName}`;
+    const existingLock = await cache.get(lockKey);
+    if (existingLock) {
+      return res.json({
+        success: true,
+        alreadyPatched: true,
+        message: `Task "${taskName}" patching is already in progress`,
+        patchedAt: existingLock.startedAt,
+        taskName
+      });
+    }
+    await cache.set(lockKey, { startedAt: new Date().toISOString(), taskName, targetName }, 300);
     
     // Step 1: Get the scan report from OpenVAS with caching
     const cacheKeyReport = `openvas:report:${taskName}`;

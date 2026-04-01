@@ -138,13 +138,18 @@ export default React.memo(function History(){
               {patchReports.map((pr, idx) => {
                 const linuxOk = pr.linuxResult && pr.linuxResult.overall_status
                 const windowsOk = pr.windowsResult && pr.windowsResult.overall_status
-                const overallSuccess = (linuxOk ? pr.linuxResult.overall_status === 'Success' : true) && (windowsOk ? pr.windowsResult.overall_status === 'Success' : true)
+                const hasResults = linuxOk || windowsOk
+                const overallSuccess = hasResults
+                  ? (linuxOk ? pr.linuxResult.overall_status === 'Success' : true) && (windowsOk ? pr.windowsResult.overall_status === 'Success' : true)
+                  : true
+                const target = (pr.targetName || '').toLowerCase()
+                const osLabel = target.includes('windows') || target.includes('win') ? '🪟 Windows' : '🐧 Linux'
                 return (
                   <div key={idx} style={{padding:'20px',borderRadius:'12px',border:`1px solid ${overallSuccess ? 'rgba(111,207,151,0.3)' : 'rgba(231,76,60,0.3)'}`,background: overallSuccess ? 'rgba(111,207,151,0.05)' : 'rgba(231,76,60,0.05)'}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'12px'}}>
                       <div>
                         <div style={{fontWeight:700,fontSize:'15px'}}>🔧 {pr.taskName}</div>
-                        <div style={{fontSize:'12px',color:'#888',marginTop:'2px'}}>Target: {pr.targetName || 'N/A'}</div>
+                        <div style={{fontSize:'12px',color:'#888',marginTop:'2px'}}>Target: {pr.targetName || 'N/A'} ({osLabel})</div>
                       </div>
                       <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
                         <div style={{textAlign:'right'}}>
@@ -153,7 +158,7 @@ export default React.memo(function History(){
                             background: overallSuccess ? 'rgba(111,207,151,0.15)' : 'rgba(231,76,60,0.15)',
                             color: overallSuccess ? '#6fcf97' : '#e74c3c'
                           }}>
-                            {overallSuccess ? '✅ Success' : '⚠️ Partial Failure'}
+                            {overallSuccess ? '✅ Completed' : '⚠️ Partial Failure'}
                           </div>
                         </div>
                         <button onClick={() => setDetailModal(idx)} style={{padding:'6px 14px',borderRadius:'8px',border:'1px solid rgba(90,155,216,0.4)',background:'rgba(90,155,216,0.1)',color:'#5a9bd8',fontSize:'12px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap'}}>View Details</button>
@@ -172,8 +177,13 @@ export default React.memo(function History(){
         const pr = patchReports[detailModal]
         const linuxOk = pr.linuxResult && pr.linuxResult.overall_status
         const windowsOk = pr.windowsResult && pr.windowsResult.overall_status
-        const overallSuccess = (linuxOk ? pr.linuxResult.overall_status === 'Success' : true) && (windowsOk ? pr.windowsResult.overall_status === 'Success' : true)
+        const hasResults = linuxOk || windowsOk
+        const overallSuccess = hasResults
+          ? (linuxOk ? pr.linuxResult.overall_status === 'Success' : true) && (windowsOk ? pr.windowsResult.overall_status === 'Success' : true)
+          : true
         const cols = (linuxOk && windowsOk) ? '1fr 1fr' : '1fr'
+        const target = (pr.targetName || '').toLowerCase()
+        const osLabel = target.includes('windows') || target.includes('win') ? '🪟 Windows' : '🐧 Linux'
         return (
           <div onClick={() => setDetailModal(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,backdropFilter:'blur(4px)'}}>
             <div onClick={e => e.stopPropagation()} style={{background:'#1a1d23',borderRadius:'16px',border:'1px solid rgba(255,255,255,0.1)',padding:'28px',width:'90%',maxWidth:'700px',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.5)'}}>
@@ -186,10 +196,26 @@ export default React.memo(function History(){
               </div>
 
               <div style={{fontSize:'13px',color:'#888',marginBottom:'20px'}}>
-                Patched on {pr.patchedAt ? new Date(pr.patchedAt).toLocaleString() : 'Unknown'} • Target: {pr.targetName || 'N/A'} • <span style={{color: overallSuccess ? '#6fcf97' : '#e74c3c',fontWeight:600}}>{overallSuccess ? 'Success' : 'Partial Failure'}</span>
+                Patched on {pr.patchedAt ? new Date(pr.patchedAt).toLocaleString() : 'Unknown'} • Target: {pr.targetName || 'N/A'} ({osLabel}) • <span style={{color: overallSuccess ? '#6fcf97' : '#e74c3c',fontWeight:600}}>{overallSuccess ? 'Completed' : 'Partial Failure'}</span>
               </div>
 
-              <div style={{display:'grid',gridTemplateColumns:cols,gap:'16px'}}>
+              {!hasResults && (
+                <div style={{padding:'24px',borderRadius:'10px',background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',textAlign:'center'}}>
+                  <div style={{fontSize:'32px',marginBottom:'12px'}}>✅</div>
+                  <div style={{fontWeight:600,fontSize:'15px',marginBottom:'8px'}}>Patching Completed</div>
+                  <div style={{fontSize:'13px',color:'#888',lineHeight:'1.6'}}>
+                    {osLabel} patching was executed for target <strong style={{color:'#e6eef6'}}>{pr.targetName}</strong>.<br/>
+                    The patching API did not return detailed playbook results for this run.
+                  </div>
+                  <div style={{marginTop:'16px',display:'flex',justifyContent:'center',gap:'24px',fontSize:'12px',color:'#aaa'}}>
+                    <span>Task: <strong style={{color:'#e6eef6'}}>{pr.taskName}</strong></span>
+                    <span>Status: <strong style={{color:'#6fcf97'}}>{pr.status}</strong></span>
+                  </div>
+                </div>
+              )}
+
+              {hasResults && (
+                <div style={{display:'grid',gridTemplateColumns:cols,gap:'16px'}}>
                 {linuxOk && (
                   <div style={{padding:'16px',borderRadius:'10px',background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)'}}>
                     <div style={{fontWeight:600,fontSize:'14px',marginBottom:'12px',display:'flex',alignItems:'center',gap:'8px'}}>
@@ -255,6 +281,7 @@ export default React.memo(function History(){
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
         )
