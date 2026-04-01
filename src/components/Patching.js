@@ -188,7 +188,15 @@ export default React.memo(function Patching() {
       if (autoData.alreadyPatched) {
         setPatchingPhases(prev => ({ ...prev, [taskName]: 'already-patched' }))
         setAlreadyPatched(prev => ({ ...prev, [taskName]: { patched: true, patchedAt: autoData.patchedAt } }))
+        setPatchingInProgress(prev => ({ ...prev, [taskName]: false }))
         return
+      }
+
+      // If another tab/session already started patching, skip (lock exists but not yet complete)
+      if (autoData.inProgress) {
+        setPatchingPhases(prev => ({ ...prev, [taskName]: 'report' }))
+        // Don't return — fall through to run the actual patching
+        // The lock just means the report step ran; the actual start-linux/start-windows still needs to happen
       }
 
       let linuxResult = null

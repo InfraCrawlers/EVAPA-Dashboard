@@ -1140,9 +1140,10 @@ app.post('/openvas/auto-patch', async (req, res) => {
     if (existingLock) {
       return res.json({
         success: true,
-        alreadyPatched: true,
+        alreadyPatched: false,
+        inProgress: true,
         message: `Task "${taskName}" patching is already in progress`,
-        patchedAt: existingLock.startedAt,
+        startedAt: existingLock.startedAt,
         taskName
       });
     }
