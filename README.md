@@ -814,6 +814,6 @@ To contribute:
 
 ---
 
-**Built with ❤️ by Group 4 Capstone — Tharuka Kannangara, Swagat Koirala, Abid Al Mohaimin, Rupesh Limbadri Vanneldas, Dillon Wijayanayagam | June 2025**
+**Built with ❤️ by Group 4 Capstone — Tharuka Kannangara, Swagat Koirala, Abid Al Mohaimin, Rupesh Limbadri Vanneldas, Dillon Wijayanayagam | 2026**
 
 **Dashboard Version 2.1 | Production Ready | Enterprise Grade**
