@@ -192,7 +192,8 @@ export default React.memo(function Patching() {
         try {
           const linuxRes = await fetch('http://localhost:3005/patching/start-linux', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
           })
           const linuxData = await linuxRes.json()
           const linuxCommandId = linuxData.command_id
@@ -224,7 +225,8 @@ export default React.memo(function Patching() {
         try {
           const winRes = await fetch('http://localhost:3005/patching/start-windows', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
           })
           const winData = await winRes.json()
           const winCommandId = winData.command_id

@@ -188,34 +188,7 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
-/**
- * GET /api/systems
- * Returns systems/assets with caching
- */
-app.get('/api/systems', async (req, res) => {
-  const cacheKey = 'systems:all';
-  
-  try {
-    let data = await cache.get(cacheKey);
-    
-    if (data) {
-      return res.json(data);
-    }
 
-    data = await fetchFromAWS('/systems');
-    
-    const ttl = parseInt(process.env.CACHE_TTL_SYSTEMS) || 1800;
-    await cache.set(cacheKey, data, ttl);
-    
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ 
-      error: 'Failed to fetch systems',
-      message: error.message,
-      source: 'error'
-    });
-  }
-});
 
 /**
  * GET /api/patch-reports
@@ -807,8 +780,13 @@ app.get('/openvas/tasks', async (req, res) => {
       }))
     };
     
-    // Cache the response (5 minutes TTL for tasks - changes frequently)
-    await cache.set(cacheKey, transformedData, 300);
+    // Only cache when NO tasks are actively running (prevents stale "running" status)
+    const hasRunning = (transformedData.tasks || []).some(t =>
+      ['running', 'requested', 'queued', 'processing'].includes((t.status || '').toLowerCase())
+    );
+    if (!hasRunning) {
+      await cache.set(cacheKey, transformedData, 300);
+    }
     
     res.json({ ...transformedData, source: 'openvas' });
   } catch (error) {
@@ -854,8 +832,11 @@ app.get('/openvas/task-progress/:taskName', async (req, res) => {
         : {})
     };
     
-    // Cache the response (1 minute TTL)
-    await cache.set(cacheKey, transformedTask, 60);
+    // Only cache when task is NOT actively running (prevents stale status)
+    const taskStatus = (transformedTask.status || '').toLowerCase();
+    if (!['running', 'requested', 'queued', 'processing'].includes(taskStatus)) {
+      await cache.set(cacheKey, transformedTask, 60);
+    }
     
     res.json({ ...transformedTask, source: 'openvas' });
   } catch (error) {
