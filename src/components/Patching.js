@@ -19,6 +19,7 @@ export default React.memo(function Patching() {
   const [patchStatusesLoaded, setPatchStatusesLoaded] = useState(false)
   const [patchResults, setPatchResults] = useState({})
   const [detailModal, setDetailModal] = useState(null)
+  const [scanStarting, setScanStarting] = useState({})
 
   const { refreshData } = useData()
 
@@ -125,6 +126,7 @@ export default React.memo(function Patching() {
     if (!window.confirm(`Start scan for task "${taskName}"?`)) return
 
     try {
+      setScanStarting(prev => ({ ...prev, [taskName]: true }))
       setLoading(true)
       const response = await openvasService.startScan(taskName)
       
@@ -139,6 +141,7 @@ export default React.memo(function Patching() {
     } catch (err) {
       const errorMsg = err.response?.data?.message || err.message
       setError(`❌ Failed to start scan: ${errorMsg}. Make sure the task exists and is in a valid state.`)
+      setScanStarting(prev => ({ ...prev, [taskName]: false }))
     } finally {
       setLoading(false)
     }
@@ -152,6 +155,13 @@ export default React.memo(function Patching() {
   const handleAutoPatching = async (taskName, task) => {
     setPatchingInProgress(prev => ({ ...prev, [taskName]: true }))
     setPatchingPhases(prev => ({ ...prev, [taskName]: 'report' }))
+
+    const target = (task.target_name || '').toLowerCase()
+    const isLinux = target.includes('ubuntu') || target.includes('linux') || target.includes('debian') || target.includes('centos') || target.includes('rhel')
+    const isWindows = target.includes('windows') || target.includes('win')
+    // If target doesn't match either, patch both as a safe default
+    const patchLinux = isLinux || (!isLinux && !isWindows)
+    const patchWindows = isWindows || (!isLinux && !isWindows)
     
     try {
       // Step 0: Generate report and record in Redis
@@ -173,66 +183,71 @@ export default React.memo(function Patching() {
         return
       }
 
-      // Step 1: Start Linux patching
-      setPatchingPhases(prev => ({ ...prev, [taskName]: 'linux-starting' }))
       let linuxResult = null
-      try {
-        const linuxRes = await fetch('http://localhost:3005/patching/start-linux', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const linuxData = await linuxRes.json()
-        const linuxCommandId = linuxData.command_id
+      let windowsResult = null
 
-        if (linuxCommandId) {
-          setPatchingPhases(prev => ({ ...prev, [taskName]: 'linux-running' }))
-          for (let i = 0; i < 40; i++) {
-            await new Promise(r => setTimeout(r, 15000))
-            const statusRes = await fetch('http://localhost:3005/patching/check-linux-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ command_id: linuxCommandId })
-            })
-            const statusData = await statusRes.json()
-            if (statusData.execution_status !== 'Still running') {
-              linuxResult = statusData
-              break
+      // Step 1: Linux patching (only if target is Linux-based)
+      if (patchLinux) {
+        setPatchingPhases(prev => ({ ...prev, [taskName]: 'linux-starting' }))
+        try {
+          const linuxRes = await fetch('http://localhost:3005/patching/start-linux', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          })
+          const linuxData = await linuxRes.json()
+          const linuxCommandId = linuxData.command_id
+
+          if (linuxCommandId) {
+            setPatchingPhases(prev => ({ ...prev, [taskName]: 'linux-running' }))
+            for (let i = 0; i < 40; i++) {
+              await new Promise(r => setTimeout(r, 15000))
+              const statusRes = await fetch('http://localhost:3005/patching/check-linux-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command_id: linuxCommandId })
+              })
+              const statusData = await statusRes.json()
+              if (statusData.execution_status !== 'Still running') {
+                linuxResult = statusData
+                break
+              }
             }
           }
+        } catch (err) {
+          console.error('Linux patching error:', err)
         }
-      } catch (err) {
-        console.error('Linux patching error:', err)
       }
 
-      // Step 2: Start Windows patching
-      setPatchingPhases(prev => ({ ...prev, [taskName]: 'windows-starting' }))
-      let windowsResult = null
-      try {
-        const winRes = await fetch('http://localhost:3005/patching/start-windows', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        })
-        const winData = await winRes.json()
-        const winCommandId = winData.command_id
+      // Step 2: Windows patching (only if target is Windows-based)
+      if (patchWindows) {
+        setPatchingPhases(prev => ({ ...prev, [taskName]: 'windows-starting' }))
+        try {
+          const winRes = await fetch('http://localhost:3005/patching/start-windows', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          })
+          const winData = await winRes.json()
+          const winCommandId = winData.command_id
 
-        if (winCommandId) {
-          setPatchingPhases(prev => ({ ...prev, [taskName]: 'windows-running' }))
-          for (let i = 0; i < 40; i++) {
-            await new Promise(r => setTimeout(r, 15000))
-            const statusRes = await fetch('http://localhost:3005/patching/check-windows-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ command_id: winCommandId })
-            })
-            const statusData = await statusRes.json()
-            if (statusData.execution_status !== 'Still running') {
-              windowsResult = statusData
-              break
+          if (winCommandId) {
+            setPatchingPhases(prev => ({ ...prev, [taskName]: 'windows-running' }))
+            for (let i = 0; i < 40; i++) {
+              await new Promise(r => setTimeout(r, 15000))
+              const statusRes = await fetch('http://localhost:3005/patching/check-windows-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command_id: winCommandId })
+              })
+              const statusData = await statusRes.json()
+              if (statusData.execution_status !== 'Still running') {
+                windowsResult = statusData
+                break
+              }
             }
           }
+        } catch (err) {
+          console.error('Windows patching error:', err)
         }
-      } catch (err) {
-        console.error('Windows patching error:', err)
       }
 
       // Store results for display
@@ -273,6 +288,48 @@ export default React.memo(function Patching() {
       case 'stopped': return '#e74c3c'
       default: return '#95a5a6'
     }
+  }
+
+  // Derive progress % from scan status + patching phase
+  const getTaskProgress = (task) => {
+    const name = task.name
+    const status = task.status?.toLowerCase()
+
+    // Patching phases (post-scan) — show patching-specific progress
+    if (alreadyPatched[name]) return 100
+    const phase = patchingPhases[name]
+    if (phase === 'completed') return 100
+    if (phase === 'windows-running') return 75
+    if (phase === 'windows-starting') return 60
+    if (phase === 'linux-running') return 45
+    if (phase === 'linux-starting') return 30
+    if (phase === 'report') return 15
+
+    // Scan phase — use the raw API progress value directly
+    if (status === 'done') return 100
+    if (status === 'running') return task.progress || 1
+    if (status === 'requested' || status === 'queued') return 1
+    if (status === 'new') return 0
+    return task.progress || 0
+  }
+
+  // Label for current phase
+  const getProgressLabel = (task) => {
+    const name = task.name
+    const status = task.status?.toLowerCase()
+    const phase = patchingPhases[name]
+
+    if (alreadyPatched[name] && !patchingInProgress[name]) return 'Patched'
+    if (phase === 'completed') return 'Patching Complete'
+    if (phase === 'windows-running') return '🪟 Windows Patching...'
+    if (phase === 'windows-starting') return '🪟 Starting Windows Patch...'
+    if (phase === 'linux-running') return '🐧 Linux Patching...'
+    if (phase === 'linux-starting') return '🐧 Starting Linux Patch...'
+    if (phase === 'report') return 'Generating Report...'
+    if (status === 'done') return 'Scan Complete'
+    if (status === 'running') return 'Scanning'
+    if (status === 'requested' || status === 'queued') return 'Queued'
+    return 'Ready'
   }
 
   // Render Stats
@@ -410,7 +467,7 @@ export default React.memo(function Patching() {
                   <span className="info-icon">⏱️</span>
                   <div className="info-text">
                     <small className="info-label">Progress</small>
-                    <div className="info-value">{task.progress || 0}% Complete</div>
+                    <div className="info-value">{getTaskProgress(task)}% — {getProgressLabel(task)}</div>
                   </div>
                 </div>
               </div>
@@ -419,7 +476,7 @@ export default React.memo(function Patching() {
                 <div className="progress-bar">
                   <div
                     className="progress-fill"
-                    style={{ width: `${task.progress || 0}%`, backgroundColor: getStatusColor(task.status) }}
+                    style={{ width: `${getTaskProgress(task)}%`, backgroundColor: patchingPhases[task.name] ? '#f39c12' : getStatusColor(task.status), transition: 'width 0.6s ease' }}
                   ></div>
                 </div>
               </div>
@@ -429,9 +486,9 @@ export default React.memo(function Patching() {
                   <button
                     className="btn btn-sm btn-success"
                     onClick={() => handleStartScan(task.name)}
-                    disabled={loading}
+                    disabled={loading || scanStarting[task.name] || patchingInProgress[task.name]}
                   >
-                    ▶ Start Scan
+                    {scanStarting[task.name] ? '⏳ Starting...' : '▶ Start Scan'}
                   </button>
                 )}
                 {task.status?.toLowerCase() === 'running' && (
@@ -481,6 +538,16 @@ export default React.memo(function Patching() {
       {successMsg && <div className="alert alert-success">{successMsg}</div>}
 
       {renderStats()}
+
+      {/* Workflow bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '12px 18px', marginBottom: '20px', borderRadius: '10px', background: 'rgba(90,155,216,0.08)', border: '1px solid rgba(90,155,216,0.15)', fontSize: '13px', color: '#a8b6c5', flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 600, color: '#e6eef6', marginRight: '6px' }}>⚙️ Workflow:</span>
+        <span>Create Task</span><span style={{ color: '#5a9bd8' }}>→</span>
+        <span>Start Scan</span><span style={{ color: '#5a9bd8' }}>→</span>
+        <span>Generate Report</span><span style={{ color: '#5a9bd8' }}>→</span>
+        <span>Auto-Patch (Linux + Windows)</span><span style={{ color: '#5a9bd8' }}>→</span>
+        <span>Dashboard Refresh</span>
+      </div>
 
       <div className="ovconfig-container">
         {/* Tasks/Scanning Section - FIRST */}
@@ -611,46 +678,6 @@ export default React.memo(function Patching() {
             </div>
           </section>
         )}
-
-        {/* Workflow Overview */}
-        <section className="ovconfig-section">
-          <div className="ovconfig-header">
-            <div>
-              <h3>⚙️ Workflow Overview</h3>
-              <p className="section-description">Complete automated scanning and patching pipeline</p>
-            </div>
-          </div>
-          
-          <div style={{ padding: '20px', backgroundColor: 'rgba(90, 155, 216, 0.08)', borderRadius: '10px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>1️⃣</div>
-                <div style={{ fontWeight: 600, marginBottom: '5px' }}>Create Scan Task</div>
-                <div style={{ fontSize: '12px', color: '#888' }}>Define target and scan profile</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>2️⃣</div>
-                <div style={{ fontWeight: 600, marginBottom: '5px' }}>Start Scan</div>
-                <div style={{ fontSize: '12px', color: '#888' }}>OpenVAS scans for vulnerabilities</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>3️⃣</div>
-                <div style={{ fontWeight: 600, marginBottom: '5px' }}>Generate Report</div>
-                <div style={{ fontSize: '12px', color: '#888' }}>Report stored in DynamoDB when done</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>4️⃣</div>
-                <div style={{ fontWeight: 600, marginBottom: '5px' }}>Auto-Patch</div>
-                <div style={{ fontSize: '12px', color: '#888' }}>Linux + Windows patching with status polling</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>5️⃣</div>
-                <div style={{ fontWeight: 600, marginBottom: '5px' }}>Update Dashboard</div>
-                <div style={{ fontSize: '12px', color: '#888' }}>Overview refreshes with patched results</div>
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
 
       <footer className="ovconfig-footer">
