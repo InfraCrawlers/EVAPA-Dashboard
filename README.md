@@ -1,783 +1,333 @@
 # EVAPA Security Dashboard
 
-**Production-Grade Vulnerability Assessment Dashboard with Redis Caching, Automated Patching & OpenVAS Integration**
+<p align="center">
+  <strong>Enterprise Vulnerability Assessment, Patching & Automation Dashboard</strong>
+</p>
 
-A full-stack React + Express dashboard for visualizing vulnerability scan data, managing OpenVAS scans, and automating Linux/Windows patching — with enterprise-grade Redis caching and graceful degradation fallback.
-
-**Current Version:** 2.1.0 | **Status:** Production Ready | **Last Updated:** June 2025  
-**Group 4 Capstone** — Tharuka Kannangara, Swagat Koirala, Abid Al Mohaimin, Rupesh Limbadri Vanneldas, Dillon Wijayanayagam
-
----
-
-## 🎯 Overview
-
-The EVAPA Security Dashboard provides:
-
-1. **Advanced Vulnerability Management** — Comprehensive view of security findings with severity categorization
-2. **Real-Time Asset Inventory** — Monitor affected systems and vulnerability distribution
-3. **Automated Linux & Windows Patching** — Two-step async flow (start playbook → poll status) with real-time progress updates
-4. **OpenVAS Scan Configuration** — Full UI for managing targets, port lists, scan configs, tasks, and reports
-5. **Enterprise Caching** — Redis-backed distributed caching reduces AWS API calls by 80-90%
-6. **Graceful Degradation** — Demo mode fallback with realistic sample data when API unavailable
-7. **Historical Tracking** — Dual-tab archive of scan reports and patch reports with detail modals
-
-**Architecture:** Redis-backed backend is **required for all environments** (development and production)
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.1.0-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/status-Production%20Ready-brightgreen" alt="Status" />
+  <img src="https://img.shields.io/badge/license-Educational-yellow" alt="License" />
+  <img src="https://img.shields.io/badge/node-%3E%3D16.x-green" alt="Node" />
+  <img src="https://img.shields.io/badge/react-18.2-61DAFB" alt="React" />
+</p>
 
 ---
 
-## ✨ Key Features
+## Overview
 
-### Core Functionality
-- ✅ **Redis-based distributed caching** — 80-90% fewer AWS API calls
-- ✅ **Smart cache invalidation** — Automatic clearing on patching/scanning
-- ✅ **Configurable TTL** — 1800-3600 second cache windows per endpoint
-- ✅ **Health checks** — Server and Redis status monitoring
-- ✅ **Graceful degradation** — Demo data when API unavailable
-- ✅ **Data normalization** — Converts any API format to unified schema
+**EVAPA** (Enterprise Vulnerability Assessment, Patching & Automation) is a full-stack security operations dashboard built with React and Express.js. It provides real-time vulnerability management, automated OS patching, and integrated vulnerability scanning — all backed by enterprise-grade Redis caching for high-performance data delivery.
 
-### Dashboard Features
-- 📊 **Overview KPIs** — Critical findings, high-risk assets, severity statistics
-- 📈 **Severity distribution charts** — Pie charts and CVSS scoring
-- 🔍 **Searchable vulnerability table** — Full-text search, filtering, pagination
-- 🖥️ **Asset inventory view** — Host-based vulnerability grouping
-- 📜 **Dual-tab history** — Scan reports and patch reports with "View Details" modal popups
-- 📋 **CSV export** — Client-side vulnerability exports
-- 🖨️ **Print-ready reports** — Full page rendering support
-- 📱 **Responsive mobile layout** — Touch-friendly interface
-- 🎨 **Full-width header & footer** — Branded layout with group member credits
-
-### Automation & Integration
-- 🔧 **Automated patching** — Linux & Windows via AWS SSM playbooks (start → poll → complete)
-- 🔍 **OpenVAS scan management** — Full CRUD for targets, port lists, scan configs, tasks, and reports
-- 🎯 **Pipeline-ready** — RESTful API backend for CI/CD integration
-- 📝 **Patch report storage** — Results persisted in Redis with 30-day retention
+Designed as a **Group 4 Capstone** project by:
+> **Tharuka Kannangara** · **Swagat Koirala** · **Abid Al Mohaimin** · **Rupesh Limbadri Vanneldas** · **Dillon Wijayanayagam**
 
 ---
 
-## 🚀 Quick Start (Redis Required for All Deployments)
+## Screenshots
+
+| Overview Dashboard | Vulnerability Table |
+|---|---|
+| ![Overview](docs/screenshots/overview-desktop.png) | ![Vulnerabilities](docs/screenshots/vulnerabilities-desktop.png) |
+
+| Asset Inventory | History & Reports |
+|---|---|
+| ![Assets](docs/screenshots/assets-inventory.png) | ![History](docs/screenshots/history-report.png) |
+
+<details>
+<summary>📱 Mobile View</summary>
+
+![Mobile](docs/screenshots/vulnerabilities-mobile.png)
+
+</details>
+
+---
+
+## Key Features
+
+### Vulnerability Management
+- Real-time severity breakdown with KPIs (Critical, High, Medium, Low)
+- Searchable and sortable vulnerability table with pagination
+- CVSS scoring and CVE tracking
+- Host-based asset inventory view
+- CSV export and print-ready reports
+
+### Automated Patching
+- One-click Linux and Windows patching via AWS SSM playbooks
+- Two-step async workflow: start playbook → poll for completion
+- Real-time progress bar with step-by-step status updates
+- Patch results stored with 30-day retention
+- Dual-tab history view for scan and patch reports
+
+### OpenVAS Integration
+- Full scan management UI: targets, port lists, scan configs, tasks
+- Start and monitor vulnerability scans
+- View detailed scan reports
+
+### Performance & Reliability
+- Redis-backed distributed caching (80–90% fewer API calls)
+- Smart cache invalidation on patching and scanning events
+- Configurable TTL per endpoint (1800–3600 seconds)
+- Graceful degradation with demo mode when APIs are unavailable
+- Health check endpoints for monitoring
+
+### User Experience
+- Responsive design with mobile-friendly card layout
+- Full-width branded header and footer
+- Six navigable tabs: Overview, Vulnerabilities, Assets, History, Patching, OpenVAS Config
+- Modal popups for detailed report viewing
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│           React Frontend (SPA)                  │
+│    Dashboard · Patching · Scanning · Reports    │
+└──────────────┬──────────────────────────────────┘
+               │ HTTP / REST
+               ▼
+┌─────────────────────────────────────────────────┐
+│       Express.js Backend (API Gateway)          │
+│    Caching · Proxy · Patching · OpenVAS         │
+└──────────────┬──────────────────────────────────┘
+               │
+        ┌──────┼──────────┐
+        ▼      ▼          ▼
+   ┌────────┐ ┌────────┐ ┌──────────────┐
+   │ Redis  │ │Patching│ │  OpenVAS     │
+   │ Cache  │ │Service │ │  Scanner     │
+   └────────┘ └────────┘ └──────────────┘
+```
+
+**Data Flow:**
+1. Frontend sends request to Express backend
+2. Backend checks Redis cache (1–10ms hit)
+3. On cache miss, fetches from upstream API (500–2000ms)
+4. Stores result in Redis with configurable TTL
+5. Returns data to frontend with source indicator (`cache` or `api`)
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Frontend** | React 18.2, Chart.js 4.4, Axios | SPA dashboard with data visualizations |
+| **Backend** | Node.js 16+, Express.js 4.18 | REST API, proxy, and caching layer |
+| **Cache** | Redis 7 (Docker Alpine) | Distributed caching with TTL |
+| **Patching** | AWS Systems Manager (SSM) | Linux & Windows automated patching |
+| **Scanning** | OpenVAS (via API) | Vulnerability scanning engine |
+| **Infrastructure** | Docker, Docker Compose | Container orchestration |
+
+---
+
+## Getting Started
 
 ### Prerequisites
+
 - **Node.js** 16.x or higher
 - **npm** 8.x or higher
 - **Docker Desktop** (required for Redis)
 
-### Step-by-Step Setup
+### Installation
 
-**Terminal 1: Clone and Install**
 ```bash
+# Clone the repository
 git clone https://github.com/InfraCrawlers/EVAPA-Dashboard.git
 cd Dashboard
+
+# Install dependencies
 npm install
+
+# Configure environment
 cp .env.example .env
+# Edit .env with your API endpoints and credentials
 ```
 
-**Terminal 2: Start Redis Container**
+### Running the Application
+
 ```bash
+# 1. Start Redis
 docker compose up -d
-```
 
-Verify Redis is running:
-```bash
-docker compose ps
-```
-
-**Terminal 3: Start Backend Server**
-```bash
+# 2. Start Backend (in a separate terminal)
 PORT=3005 npm run server
-```
 
-Expected output:
-```
-Redis connected successfully
-🚀 Dashboard API Server running on http://localhost:3005
-```
-
-**Terminal 4: Start Frontend**
-```bash
+# 3. Start Frontend (in a separate terminal)
 npm start
 ```
 
-Opens `http://localhost:3000` automatically.
+The dashboard opens at `http://localhost:3000`.
 
-### Or Run Both Concurrently
-
+**Or run everything concurrently:**
 ```bash
-PORT=3005 npm run start:dev
+docker compose up -d
 npm run start:dev
 ```
 
-### Verify Everything Works
+### Production Build
 
 ```bash
-# Check backend
-curl http://localhost:3005/health
-# Response: { "status": "ok", "redis": "connected", ... }
-
-# Check cache
-curl http://localhost:3005/cache/stats
+npm run build
+PORT=3005 npm run start:prod
 ```
 
-### Production Deployment
+---
+
+## Configuration
+
+Create a `.env` file from the provided template:
 
 ```bash
-npm run build          # Build React frontend
-PORT=3005 npm run start:prod     # Start Express server with built frontend (requires Redis)
+cp .env.example .env
 ```
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Backend server port | `3005` |
+| `NODE_ENV` | Environment mode | `development` |
+| `REDIS_HOST` | Redis hostname | `localhost` |
+| `REDIS_PORT` | Redis port | `6379` |
+| `REDIS_PASSWORD` | Redis password (if auth enabled) | — |
+| `CACHE_TTL_FINDINGS` | Findings cache TTL (seconds) | `3600` |
+| `CACHE_TTL_REPORTS` | Reports cache TTL (seconds) | `3600` |
+| `AWS_API_ENDPOINT` | Upstream vulnerability data API | — |
+| `AWS_REGION` | AWS region for SSM patching | `us-east-1` |
+
+> **Note:** Refer to `.env.example` for the full list of configurable variables.
 
 ---
 
-## 📡 API Endpoints
-
-### Data Endpoints (Cached)
-
-| Method | Endpoint | Description | TTL | Response |
-|--------|----------|-------------|-----|----------|
-| GET | `/api/findings` | Vulnerability findings | 3600s | `{data: [...], source: "cache\|aws"}` |
-| GET | `/api/reports` | Scan reports | 3600s | `{data: [...], source: "cache\|aws"}` |
-| GET | `/api/systems` | Asset systems | 1800s | `{data: [...], source: "cache\|aws"}` |
-| GET | `/api/patch-reports` | Patch reports from Redis | — | `{reports: [...]}` |
-
-### Patching Endpoints (Linux + Windows)
-
-| Method | Endpoint | Description | Body |
-|--------|----------|-------------|------|
-| POST | `/patching/start-linux` | Start Linux patching playbook | — |
-| POST | `/patching/check-linux-status` | Poll Linux patching status | `{command_id}` |
-| POST | `/patching/start-windows` | Start Windows patching playbook | — |
-| POST | `/patching/check-windows-status` | Poll Windows patching status | `{command_id}` |
-| POST | `/patching/mark-complete` | Mark patching as completed | `{taskName, targetName, linuxResult, windowsResult}` |
-| POST | `/patching/apply` | Legacy trigger VM patching | `{vms}` |
-
-### OpenVAS Scan Management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/openvas/port-lists` | List all port lists |
-| POST | `/openvas/port-lists` | Create a port list |
-| GET | `/openvas/targets` | List all targets |
-| POST | `/openvas/targets` | Create a target |
-| GET | `/openvas/scan-configs` | List scan configurations |
-| GET | `/openvas/tasks` | List all scan tasks |
-| POST | `/openvas/tasks` | Create a scan task |
-| POST | `/openvas/tasks/:id/start` | Start a scan task |
-| GET | `/openvas/reports` | List all scan reports |
-| GET | `/openvas/reports/:id` | Get report details |
-
-### Management Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/cache/clear` | Manually clear all cache keys |
-| GET | `/cache/stats` | View Redis memory and usage stats |
-| GET | `/health` | Server health check with Redis status |
-| GET | `/aws/ec2-instances` | Fetch EC2 instances (cached 10 min) |
-
----
-
-## 🏗️ Architecture
-
-### System Diagram
-
-```
-┌─────────────────────────────────────────────────┐
-│         React Frontend (Port 3000)              │
-│    - Vulnerability Dashboard UI                │
-│    - Patching/Scanning Controls                │
-│    - OpenVAS Scan Configuration                │
-│    - Historical Report Viewer                  │
-└──────────────┬──────────────────────────────────┘
-               │ HTTP Requests
-               ▼
-┌─────────────────────────────────────────────────┐
-│    Express.js Backend (Port 3005)               │
-│    - API Route Handling & Proxy                 │
-│    - Cache Service Layer (Redis)                │
-│    - Patching API Proxy (Linux + Windows)       │
-│    - OpenVAS API Proxy                          │
-│    - Error Handling & Logging                   │
-└──────────────┬──────────────────────────────────┘
-               │
-        ┌──────┼──────────┐
-        │      │          │
-        ▼      ▼          ▼
-   ┌────────┐ ┌────────┐ ┌──────────────┐
-   │ Redis  │ │Patching│ │  OpenVAS     │
-   │ Cache  │ │  API   │ │  API         │
-   │:6379   │ │(AWS)   │ │(AWS Lambda)  │
-   └────────┘ └────────┘ └──────────────┘
-```
-
-### Data Flow
-
-1. **Frontend Request** → Express Backend via HTTP
-2. **Cache Check** → Redis (instant 1-10ms if hit)
-3. **Cache Miss** → Fetch from AWS (500-2000ms)
-4. **Store Result** → Redis with configurable TTL
-5. **Return Data** → Frontend includes `source: "cache|aws"`
-
-### Component Hierarchy
-
-```
-App (index.js)
-├── DataProvider (dataContext.js)
-│   └── Dashboard.js (app shell, header, sidebar, footer)
-│       ├── Overview.js (KPIs & stats)
-│       │   └── Charts.js (visualizations)
-│       ├── Vulnerabilities.js (table & search)
-│       ├── AssetsInventory.js (host grouping)
-│       ├── History.js (scan + patch reports, dual tabs)
-│       ├── Patching.js (auto-patch flow with modals)
-│       └── OpenVASConfig.js (scan management UI)
-```
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 Dashboard/
 ├── src/
 │   ├── components/
-│   │   ├── Dashboard.js         # App shell, header, sidebar, footer
-│   │   ├── Overview.js          # KPI dashboard
-│   │   ├── Charts.js            # Chart.js wrapper
-│   │   ├── Vulnerabilities.js   # Findings table
-│   │   ├── AssetsInventory.js   # Host grouping
-│   │   ├── History.js           # Scan + patch report history (dual tabs)
-│   │   ├── Patching.js          # Auto-patch flow with modal popups
-│   │   ├── OpenVASConfig.js     # OpenVAS scan management UI
-│   │   └── OpenVASConfig.css    # OpenVAS config styles
+│   │   ├── Dashboard.js         # App shell, navigation, layout
+│   │   ├── Overview.js          # KPI dashboard with charts
+│   │   ├── Charts.js            # Chart.js visualizations
+│   │   ├── Vulnerabilities.js   # Findings table with search
+│   │   ├── AssetsInventory.js   # Host-based grouping
+│   │   ├── History.js           # Scan + patch report archive
+│   │   ├── Patching.js          # Automated patching workflow
+│   │   └── OpenVASConfig.js     # Scan management UI
 │   ├── services/
 │   │   └── openvasService.js    # OpenVAS API client
-│   ├── dataContext.js           # State, API layer & refreshData
-│   ├── mockData.js              # Demo fallback data
-│   ├── index.js                 # React entry point
-│   ├── index.css                # Global responsive styles
-│   └── App.js
-│
-├── server.js                    # Express backend with Redis, patching & OpenVAS proxy
-├── docker-compose.yml           # Redis container
-├── package.json                 # Scripts & dependencies
-├── .env.example                 # Configuration template
-│
-├── public/
-│   └── index.html              # HTML entry point
-│
-├── docs/
-│   ├── REDIS_CACHING.md        # Complete Redis guide
-│   ├── SETUP_GUIDE.md          # Step-by-step setup
-│   ├── REDIS_IMPLEMENTATION.md # Technical details
-│   ├── PATCHING_FEATURE.md     # Patching documentation
-│   ├── PATCHING_API.md         # Patching API reference
-│   ├── DEMO_MODE.md            # Demo mode details
-│   ├── CODEBASE_ANALYSIS.md    # Architecture deep-dive
-│   └── screenshots/            # UI screenshots
-│
-└── build/                       # Production build (generated)
+│   ├── dataContext.js           # State management & API layer
+│   ├── mockData.js              # Demo mode fallback data
+│   └── App.js                   # Root component
+├── server.js                    # Express backend
+├── docker-compose.yml           # Redis container config
+├── docs/                        # Extended documentation
+└── build/                       # Production build output
 ```
 
 ---
 
-## ⚙️ Configuration
+## Performance
 
-### Environment Variables (.env)
+| Metric | Value |
+|--------|-------|
+| Cache hit response | 1–10 ms |
+| Cache miss response | 500–2000 ms |
+| API call reduction | ~90% |
+| Production bundle | 130 kB (gzipped) |
+| Cache hit rate (steady state) | 95%+ |
+
+---
+
+## Deployment
+
+### Docker
 
 ```bash
-# Server Configuration
-PORT=3005
-NODE_ENV=development
-
-# Redis Connection
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-
-# Cache TTL (seconds)
-CACHE_TTL_FINDINGS=3600    # 1 hour
-CACHE_TTL_REPORTS=3600     # 1 hour
-CACHE_TTL_SYSTEMS=1800     # 30 minutes
-
-# AWS API (DynamoDB)
-AWS_API_ENDPOINT=https://7ayzyoa7fl.execute-api.us-east-1.amazonaws.com
-
-# AWS EC2 (optional — for EC2 instance listing)
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_REGION=us-east-1
+docker build -t evapa-dashboard:latest .
+docker run -p 3005:3005 -e REDIS_HOST=redis evapa-dashboard:latest
 ```
 
-### npm Scripts
-
-| Command | Purpose |
-|---------|---------|
-| `npm start` | Start React frontend (port 3000) |
-| `npm run server` | Start backend with hot-reload (port 3005) |
-| `npm run start:dev` | Run backend + frontend concurrently |
-| `npm run start:prod` | Production server mode (serves built frontend on port 3005) |
-| `npm run build` | Build React production bundle |
-| `npm test` | Run tests |
-
----
-
-## 🔄 Deployment Architecture
-
-### Redis-Backed Production Setup
-
-**Performance:** Cache hits 1-10ms, misses 500-2000ms  
-**AWS Calls:** 90% reduction (~6/hour instead of 60)  
-**Bandwidth:** 90% savings  
-**Recommended For:** All production and development deployments
-
-**Setup:**
-```bash
-docker compose up -d      # Start Redis container
-npm run server            # Start backend with caching
-npm start                 # Start frontend
-```
-
-### Demo Mode (Graceful Degradation)
-
-**Automatic Fallback:** When backend API unavailable  
-**Demo Data:** 15 realistic vulnerabilities across 8 systems  
-**Triggered:** Automatically on connection errors
-
-- Shows yellow banner: "ℹ️ Demo Mode: Showing sample data"
-- Full feature testing with realistic vulnerability data
-- No manual configuration needed
-- Disabled when backend is reachable
-
----
-
-## 📊 Performance Metrics
-
-### Caching Performance
-
-| Scenario | Redis | Improvement |
-|----------|-------|-------------|
-| Cache Hit | 1-10ms | **Instant** |
-| Cache Miss | 500-2000ms | Same (first load) |
-| Subsequent Requests | 1-10ms | **100-200x faster** |
-| AWS API Calls | ~6/hour | **90% reduction** |
-| Network Bandwidth | 10% usage | **90% savings** |
-
-### Implementation Size
-
-| Component | Size |
-|-----------|------|
-| React Bundle | 130.22 kB (gzipped) |
-| Backend Server | ~15 kB |
-| Docker Redis Image | ~50 MB (Alpine 7) |
-| Total with node_modules | ~200 MB |
-
----
-
-## 🔐 Security Considerations
-
-- ✅ **CORS Enabled** — Cross-origin requests from frontend
-- ✅ **No Authentication** — Demo/internal use only
-- ✅ **Error Handling** — Sensitive info not exposed
-- ✅ **Graceful Fallback** — API errors don't break dashboard
-- ✅ **Data Normalization** — Validates incoming data
-- ⚠️ **TODO:** API key authentication for production
-- ⚠️ **TODO:** Rate limiting and DDoS protection
-- ⚠️ **TODO:** HTTPS/TLS for production
-
----
-
-## 🧪 Testing & Verification
-
-### 1. Verify Backend Health
+### Docker Compose (Full Stack)
 
 ```bash
-curl http://localhost:3005/health
+docker compose up -d
 ```
 
-**Expected Response:**
-```json
-{
-  "status": "ok",
-  "redis": "connected",
-  "timestamp": "2024-03-24T12:00:00.000Z"
-}
-```
+### Cloud (AWS)
 
-### 2. Test Cache Hit
+| Component | Service |
+|-----------|---------|
+| Frontend | CloudFront + S3 |
+| Backend | EC2 / ECS |
+| Cache | ElastiCache (Redis) |
+
+---
+
+## Documentation
+
+Detailed documentation is available in the [`docs/`](docs/) directory:
+
+| Document | Description |
+|----------|-------------|
+| [Setup Guide](docs/SETUP_GUIDE.md) | Step-by-step installation and deployment |
+| [Redis Caching](docs/REDIS_CACHING.md) | Cache architecture and configuration |
+| [Redis Implementation](docs/REDIS_IMPLEMENTATION.md) | Technical implementation details |
+| [Patching Feature](docs/PATCHING_FEATURE.md) | Automated patching workflow |
+| [Patching API](docs/PATCHING_API.md) | Patching endpoint reference |
+| [Demo Mode](docs/DEMO_MODE.md) | Graceful degradation behavior |
+| [Codebase Analysis](docs/CODEBASE_ANALYSIS.md) | Architecture deep-dive |
+
+---
+
+## Troubleshooting
+
+<details>
+<summary><strong>Redis connection failed</strong></summary>
 
 ```bash
-# First request (cache miss)
-time curl http://localhost:3005/api/findings
-# Response time: 500-2000ms, "source": "aws"
-
-# Second request (cache hit)
-time curl http://localhost:3005/api/findings  
-# Response time: 1-10ms, "source": "cache"
+docker ps | grep redis          # Verify container is running
+docker compose down && docker compose up -d   # Restart Redis
 ```
+</details>
 
-### 3. Monitor Cache Statistics
+<details>
+<summary><strong>Backend won't start</strong></summary>
 
 ```bash
-curl http://localhost:3005/cache/stats
+lsof -i :3005     # Check if port is already in use
+node -c server.js  # Validate syntax
 ```
+</details>
 
-### 4. Test Patching
+<details>
+<summary><strong>Dashboard shows demo data</strong></summary>
 
-```bash
-# Start Linux patching
-curl -X POST http://localhost:3005/patching/start-linux
-
-# Check Linux status (use command_id from response above)
-curl -X POST http://localhost:3005/patching/check-linux-status \
-  -H "Content-Type: application/json" \
-  -d '{"command_id":"<COMMAND_ID>"}'
-
-# Start Windows patching
-curl -X POST http://localhost:3005/patching/start-windows
-```
+- A yellow banner indicates demo mode is active
+- Verify your `.env` file has the correct API endpoint configured
+- Ensure the backend server is running and reachable
+</details>
 
 ---
 
-## 🧭 Core Components
+## Contributing
 
-### `src/dataContext.js` — State Management
-
-**Responsibilities:**
-- Fetch vulnerability data from backend API
-- Normalize incoming data to unified format
-- Manage 30-day report history (via Redis)
-- Handle demo mode fallback
-- Route all requests through Express backend
-
-**Exported Hooks:**
-- `useData()` — Get current data, loading, error, demoMode, and `refreshData` function
-- `refreshData()` — Re-triggers data fetch after patching/scanning completes
-
-**API Endpoints Used:**
-- `GET /api/findings` — Vulnerability findings (Redis cached)
-- `POST /patching/start-linux` — Start Linux patching playbook
-- `POST /patching/start-windows` — Start Windows patching playbook
-- `POST /patching/mark-complete` — Mark patching task completed
-
-### `src/components/Dashboard.js` — App Shell
-
-**Layout Structure:**
-- `app-shell` wrapper (flex column, full viewport width)
-- `app-header` — full-width sticky header with brand, title, and "Group 4 Capstone" badge
-- `app-root` — flex row containing sidebar + main content area
-- Footer with group member credits
-
-**Provides:**
-- Sidebar navigation with active tab state
-- Mobile-responsive menu toggle (hamburger in header)
-- Tab routing to 6 main views (all always mounted, hidden via `display:none`)
-- Demo banner (yellow) when in demo mode
-
-**Routes:**
-- Overview — KPI dashboard
-- Vulnerabilities — Full findings table
-- Assets — Host-based group view
-- History — Scan + patch report archive
-- Patching — Automation controls
-- OpenVAS Config — Scan management
-
-### `src/components/Overview.js` — KPI Dashboard
-
-**Displays:**
-- Total findings count
-- Severity breakdown (Critical/High/Medium/Low)
-- Affected hosts count
-- Unique CVEs tracked
-- Average CVSS score
-- Severity distribution pie chart
-
-**Interactive:**
-- Click severity badge → navigate to Vulnerabilities filtered view
-
-### `src/components/Vulnerabilities.js` — Findings Table
-
-**Features:**
-- Searchable by finding name, CVE, host
-- Sortable columns (severity, CVSS, host)
-- Pagination (10 findings per page)
-- CSV export button
-- Click row → detailed modal view
-- Mobile responsive (card view on mobile)
-
-### `src/components/AssetsInventory.js` — Host Grouping
-
-**Shows:**
-- List of affected hosts
-- Count of findings per host
-- Severity distribution per host
-- Click host → filter Vulnerabilities view
-
-### `src/components/History.js` — Report Archive
-
-**Displays:**
-- **Dual-tab interface:** "Scan Reports" and "Patch Reports"
-- Scan tab: List of 30-day archived scan reports with finding counts
-- Patch tab: Compact patch report cards with Linux/Windows status
-- **"View Details" modal popup** with blurred backdrop for patch results
-- Modal only shows OS panels (Linux/Windows) that have actual data
-- Export reports as JSON
-
-### `src/components/Patching.js` — Automated Patching
-
-**Capabilities:**
-- Select a scan task to patch
-- **Auto-patching flow:** Generate report → Linux patch → poll → Windows patch → poll → mark complete
-- Real-time progress bar with step-by-step status updates (15s polling intervals)
-- **Modal popup** for viewing detailed patch results (Linux + Windows)
-- Only displays OS panels with actual results (conditional grid layout)
-- Calls `refreshData()` after completion to update dashboard KPIs
-- Patch results persisted to Redis via `/patching/mark-complete`
-
-### `src/components/OpenVASConfig.js` — Scan Configuration
-
-**Capabilities:**
-- Create and manage port lists, targets, scan configs, and tasks
-- Start scan tasks and monitor progress
-- View scan reports and detailed results
-- Integrated with OpenVAS API via Express backend proxy
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes (`git commit -m 'Add my feature'`)
+4. Push to the branch (`git push origin feature/my-feature`)
+5. Open a Pull Request
 
 ---
 
-## 🛠️ Data Normalization
+## License
 
-The dashboard normalizes various API response formats into two internal types:
-
-### Report Summary (item_type: "report_summary")
-
-```javascript
-{
-  item_type: "report_summary",
-  scan_start: "2024-03-24T10:00:00Z",
-  report_id: "rpt_abc123",
-  total_high_severity_count: 12,
-  raw: { /* original API response */ }
-}
-```
-
-### Vulnerability Finding (item_type: "finding")
-
-```javascript
-{
-  item_type: "finding",
-  name: "SQL Injection Vulnerability",
-  host: "web-server-01",
-  port: 3306,
-  severity: "High",
-  severity_num: 8.5,
-  cvss: "8.5",
-  cves: ["CVE-2023-12345"],
-  description: "SQL injection vulnerability in login form...",
-  reference: "nvt:1234567",
-  raw: { /* original finding data */ }
-}
-```
+This project is intended for **educational and demonstration purposes** as part of the Group 4 Capstone at Seneca Polytechnic.
 
 ---
 
-## 📚 Documentation
-
-Each feature has dedicated documentation:
-
-- **[docs/REDIS_CACHING.md](docs/REDIS_CACHING.md)** (15 KB)
-  - Redis architecture and configuration
-  - Cache endpoint reference
-  - Troubleshooting guide
-  - Performance optimization tips
-
-- **[docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)** (8 KB)
-  - Step-by-step installation
-  - Docker setup
-  - Verification procedures
-  - Production deployment patterns
-
-- **[docs/PATCHING_FEATURE.md](docs/PATCHING_FEATURE.md)** (4 KB)
-  - Patching automation details
-  - VM selection logic
-  - Status tracking
-  - API integration
-
-- **[docs/PATCHING_API.md](docs/PATCHING_API.md)** (Patching API Reference)
-  - Linux & Windows patching endpoints
-  - Two-step async flow (start → poll)
-  - Mark-complete workflow
-
-- **[docs/DEMO_MODE.md](docs/DEMO_MODE.md)** (2 KB)
-  - Graceful degradation behavior
-  - Demo data structure
-  - Testing without API
-
-- **[docs/CODEBASE_ANALYSIS.md](docs/CODEBASE_ANALYSIS.md)** (8 KB)
-  - Architecture deep-dive
-  - Data flow explanation
-  - Component relationships
-
-- **[docs/REDIS_IMPLEMENTATION.md](docs/REDIS_IMPLEMENTATION.md)** (6 KB)
-  - Implementation summary
-  - Files created/modified
-  - Deployment checklist
-
----
-
-## 🚢 Deployment
-
-### Docker Deployment
-
-```dockerfile
-FROM node:16-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-CMD ["npm", "run", "start:prod"]
-```
-
-```bash
-docker build -t dashboard:latest .
-docker run -p 3005:3005 -e REDIS_HOST=redis dashboard:latest
-```
-
-### AWS Deployment
-
-**Frontend:** CloudFront + S3 (static)  
-**Backend:** EC2/ECS + ElastiCache Redis  
-**Database:** Optional DynamoDB for reports
-
-### Kubernetes
-
-```yaml
-apiVersion: v1
-kind: Deployment
-metadata:
-  name: dashboard
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-      - name: dashboard
-        image: dashboard:latest
-        env:
-        - name: REDIS_HOST
-          value: redis-service
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Redis Connection Failed
-
-```bash
-# Check Docker
-docker ps | grep redis
-
-# Restart
-docker compose down && docker compose up -d
-```
-
-### Backend Won't Start
-
-```bash
-# Check port 3005
-lsof -i :3005
-
-# Check syntax
-node -c server.js
-```
-
-### Frontend Slow
-
-```bash
-# Check cache hit rate
-curl http://localhost:3005/cache/stats
-
-# Clear old cache
-curl -X POST http://localhost:3005/cache/clear
-```
-
-### Demo Mode Symptoms
-
-- Yellow banner appears
-- No API errors shown
-- Using mock data
-- Check API endpoint in `.env`
-
----
-
-## 🔄 Development Workflow
-
-### Local Development
-
-```bash
-# Terminal 1: Backend
-PORT=3005 npm run server
-
-# Terminal 2: Frontend
-npm start
-
-# Watch server logs in Terminal 1 for cache hits/misses
-```
-
-### Testing New Features
-
-1. Start with Redis and backend running (`docker compose up -d && PORT=3005 npm run server`)
-2. Test with demo data enabled (yellow banner shows data source)
-3. Run full stack with real API
-4. Check all 6 tabs load correctly (Overview, Vulnerabilities, Assets, History, Patching, OpenVAS Config)
-
-### Adding New Endpoint
-
-1. Add route in `server.js`
-2. Implement cache key strategy
-3. Update frontend `dataContext.js` to call it
-4. Add documentation
-5. Test with `curl`
-
----
-
-## 📊 Technology Stack
-
-### Frontend
-- **React** 18.2.0 — UI framework
-- **Chart.js** 4.4.0 — Data visualizations
-- **react-chartjs-2** 5.2.0 — React wrapper
-- **Axios** 1.4.0 — HTTP client
-- **CSS3** — Responsive styling with Flexbox
-
-### Backend
-- **Node.js** 16.x+
-- **Express.js** 4.18.2 — REST API
-- **Redis** 7.x — Distributed cache
-- **Dotenv** — Environment configuration
-
-### Infrastructure
-- **Docker** — Container runtime
-- **Docker Compose** — Multi-container orchestration (Redis)
-- **AWS API Gateway** — Vulnerability data source
-- **AWS Lambda** — Patching service backend (Linux + Windows SSM playbooks)
-- **OpenVAS** — Vulnerability scanning engine (via AWS-hosted API)
-
----
-
-## 📈 Usage Statistics
-
-Based on typical security team workflow:
-
-- **Daily active users:** 5-50
-- **API calls reduced:** 90% (from ~14,400/day to ~1,440/day)
-- **Cost savings:** $400-800/month on AWS API calls
-- **Dashboard load time:** 100-200x faster for cached requests
-- **Cache hit rate:** 95%+ after first 24 hours
-
----
-
-## 📝 License
-
-This project is intended for **educational and demonstration purposes** by Group 4 Capstone.
+<p align="center">
+  <sub>Built with React, Express.js, Redis, and OpenVAS</sub>
+</p>
 
 ---
 
