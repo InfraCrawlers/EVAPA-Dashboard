@@ -54,27 +54,34 @@ Designed as a **Group 4 Capstone** project by:
 ### Automated Patching
 - One-click Linux and Windows patching via AWS SSM playbooks
 - Two-step async workflow: start playbook → poll for completion
-- Real-time progress bar with step-by-step status updates
+- OS-aware patching — automatically determines Linux, Windows, or both based on target
+- Real-time progress bar with phased status updates (report → Linux → Windows → complete)
+- Duplicate prevention via Redis-based locking and client-side tracking
 - Patch results stored with 30-day retention
-- Dual-tab history view for scan and patch reports
+- Dual-tab history view for scan and patch reports with detail modals
 
 ### OpenVAS Integration
 - Full scan management UI: targets, port lists, scan configs, tasks
-- Start and monitor vulnerability scans
+- Create scan targets directly from running EC2 instances
+- Start and monitor vulnerability scans with live progress tracking
+- Auto-patching triggers when scan tasks complete
 - View detailed scan reports
 
 ### Performance & Reliability
 - Redis-backed distributed caching (80–90% fewer API calls)
 - Smart cache invalidation on patching and scanning events
-- Configurable TTL per endpoint (1800–3600 seconds)
+- Conditional caching — running scan tasks bypass cache for real-time progress
+- Configurable TTL per endpoint (60s–3600s depending on data volatility)
 - Graceful degradation with demo mode when APIs are unavailable
-- Health check endpoints for monitoring
+- Health check and cache statistics endpoints
 
 ### User Experience
 - Responsive design with mobile-friendly card layout
 - Full-width branded header and footer
 - Six navigable tabs: Overview, Vulnerabilities, Assets, History, Patching, OpenVAS Config
 - Modal popups for detailed report viewing
+- Live dashboard with 30-second auto-refresh and infrastructure monitoring grid
+- EC2 fleet status, scan progress, and patch status at a glance
 
 ---
 
@@ -92,12 +99,13 @@ Designed as a **Group 4 Capstone** project by:
 │    Caching · Proxy · Patching · OpenVAS         │
 └──────────────┬──────────────────────────────────┘
                │
-        ┌──────┼──────────┐
-        ▼      ▼          ▼
-   ┌────────┐ ┌────────┐ ┌──────────────┐
-   │ Redis  │ │Patching│ │  OpenVAS     │
-   │ Cache  │ │Service │ │  Scanner     │
-   └────────┘ └────────┘ └──────────────┘
+     ┌─────────┼──────────┬──────────────┐
+     ▼         ▼          ▼              ▼
+┌────────┐ ┌────────┐ ┌──────────┐ ┌──────────┐
+│ Redis  │ │AWS SSM │ │ OpenVAS  │ │ AWS API  │
+│ Cache  │ │Patching│ │ Scanner  │ │ Gateway  │
+└────────┘ └────────┘ └──────────┘ │(DynamoDB)│
+                                   └──────────┘
 ```
 
 **Data Flow:**
@@ -113,12 +121,14 @@ Designed as a **Group 4 Capstone** project by:
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Frontend** | React 18.2, Chart.js 4.4, Axios | SPA dashboard with data visualizations |
+| **Frontend** | React 18.2, Chart.js 4.4, Axios 1.4 | SPA dashboard with data visualizations |
 | **Backend** | Node.js 16+, Express.js 4.18 | REST API, proxy, and caching layer |
-| **Cache** | Redis 7 (Docker Alpine) | Distributed caching with TTL |
-| **Patching** | AWS Systems Manager (SSM) | Linux & Windows automated patching |
+| **Cache** | Redis 7 (Docker Alpine), redis 4.6 client | Distributed caching with TTL |
+| **AWS** | @aws-sdk/client-ec2, API Gateway, SSM | EC2 monitoring, patching, data source |
 | **Scanning** | OpenVAS (via API) | Vulnerability scanning engine |
-| **Infrastructure** | Docker, Docker Compose | Container orchestration |
+| **Icons** | Font Awesome 6.4 (CDN) | UI iconography |
+| **Infrastructure** | Docker, Docker Compose 3.8 | Container orchestration |
+| **Dev Tools** | Nodemon, concurrently | Hot-reload, parallel process runner |
 
 ---
 
@@ -185,17 +195,22 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PORT` | Backend server port | `3005` |
+| `PORT` | Backend server port | `5000` |
 | `NODE_ENV` | Environment mode | `development` |
 | `REDIS_HOST` | Redis hostname | `localhost` |
 | `REDIS_PORT` | Redis port | `6379` |
 | `REDIS_PASSWORD` | Redis password (if auth enabled) | — |
 | `CACHE_TTL_FINDINGS` | Findings cache TTL (seconds) | `3600` |
 | `CACHE_TTL_REPORTS` | Reports cache TTL (seconds) | `3600` |
-| `AWS_API_ENDPOINT` | Upstream vulnerability data API | — |
-| `AWS_REGION` | AWS region for SSM patching | `us-east-1` |
+| `CACHE_TTL_PATCHING` | Patching result cache TTL (seconds) | `300` |
+| `CACHE_TTL_OPENVAS` | OpenVAS report cache TTL (seconds) | `300` |
+| `AWS_API_ENDPOINT` | Vulnerability data API (DynamoDB) | — |
+| `AWS_PATCHING_API` | Patching service API endpoint | — |
+| `AWS_ACCESS_KEY_ID` | AWS credentials for EC2 listing | — |
+| `AWS_SECRET_ACCESS_KEY` | AWS credentials for EC2 listing | — |
+| `AWS_REGION` | AWS region | `us-east-1` |
 
-> **Note:** Refer to `.env.example` for the full list of configurable variables.
+> **Note:** Refer to `.env.example` for the full list. The server is typically run with `PORT=3005` to match the frontend proxy setting.
 
 ---
 
@@ -206,20 +221,25 @@ Dashboard/
 ├── src/
 │   ├── components/
 │   │   ├── Dashboard.js         # App shell, navigation, layout
-│   │   ├── Overview.js          # KPI dashboard with charts
-│   │   ├── Charts.js            # Chart.js visualizations
-│   │   ├── Vulnerabilities.js   # Findings table with search
+│   │   ├── Overview.js          # KPI dashboard with live monitoring
+│   │   ├── Charts.js            # Chart.js visualizations (bar, pie)
+│   │   ├── Vulnerabilities.js   # Findings table with search & export
 │   │   ├── AssetsInventory.js   # Host-based grouping
+│   │   ├── DataTable.js         # Generic data table utility
 │   │   ├── History.js           # Scan + patch report archive
 │   │   ├── Patching.js          # Automated patching workflow
-│   │   └── OpenVASConfig.js     # Scan management UI
+│   │   ├── OpenVASConfig.js     # Scan management UI
+│   │   └── OpenVASConfig.css    # OpenVAS config styles
 │   ├── services/
 │   │   └── openvasService.js    # OpenVAS API client
 │   ├── dataContext.js           # State management & API layer
 │   ├── mockData.js              # Demo mode fallback data
+│   ├── index.js                 # React entry point (createRoot)
+│   ├── index.css                # Global responsive styles
 │   └── App.js                   # Root component
-├── server.js                    # Express backend
+├── server.js                    # Express backend with Redis & API proxy
 ├── docker-compose.yml           # Redis container config
+├── package.json                 # Dependencies & scripts
 ├── docs/                        # Extended documentation
 └── build/                       # Production build output
 ```
@@ -328,26 +348,6 @@ This project is intended for **educational and demonstration purposes** as part 
 <p align="center">
   <sub>Built with React, Express.js, Redis, and OpenVAS</sub>
 </p>
-
----
-
-## 🤝 Contributing
-
-To contribute:
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request to `prototype` branch
-
----
-
-## 📧 Support & Questions
-
-- **Setup Issues:** See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)
-- **Redis Questions:** See [docs/REDIS_CACHING.md](docs/REDIS_CACHING.md)
-- **Patching Issues:** See [docs/PATCHING_FEATURE.md](docs/PATCHING_FEATURE.md)
 - **Architecture:** See [docs/CODEBASE_ANALYSIS.md](docs/CODEBASE_ANALYSIS.md)
 
 ---
